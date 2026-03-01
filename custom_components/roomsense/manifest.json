@@ -1,11 +1,11 @@
 {
   "domain": "roomsense",
   "name": "RoomSense",
-  "integration_type": "hub",
   "codeowners": ["@snazzybean"],
   "config_flow": true,
   "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/snazzybean/roomsense",
+  "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/snazzybean/roomsense/issues",
   "requirements": [],
