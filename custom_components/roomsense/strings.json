@@ -13,6 +13,7 @@
   "issues": {
     "restart_required": {
       "title": "Restart required",
+      "fixable": true,
       "description": "RoomSense {version} has been installed but Home Assistant is still running an older version. A restart is required to complete the update.",
       "fix_flow": {
         "step": {

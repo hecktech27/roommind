@@ -13,7 +13,7 @@ from homeassistant.components.frontend import (
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS, VERSION
@@ -22,6 +22,8 @@ from .store import RoomSenseStore
 from .websocket_api import async_register_websocket_commands
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
