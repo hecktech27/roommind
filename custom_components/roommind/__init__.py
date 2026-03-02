@@ -63,7 +63,17 @@ async def _async_migrate_storage(hass: HomeAssistant) -> None:
     new_path = Path(hass.config.path(".storage")) / "roommind"
     if old_path.exists() and not new_path.exists():
         old_path.rename(new_path)
-        _LOGGER.info("Migrated storage from 'roomsense' to 'roommind'")
+        _LOGGER.info("Migrated storage file from 'roomsense' to 'roommind'")
+    # Update the internal storage key so HA's Store recognises the data
+    if new_path.exists():
+        try:
+            data = json.loads(new_path.read_text())
+            if data.get("key") == "roomsense":
+                data["key"] = "roommind"
+                new_path.write_text(json.dumps(data, indent=2))
+                _LOGGER.info("Migrated storage key from 'roomsense' to 'roommind'")
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to migrate storage key")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
