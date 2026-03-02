@@ -4,6 +4,7 @@ import type { HomeAssistant, HassArea, RoomConfig, OverrideType } from "../types
 import { getModeClass, formatMode } from "../utils/room-state";
 import { modeStyles } from "../styles/shared-mode-styles";
 import { localize } from "../utils/localize";
+import { formatTemp, tempUnit, toDisplayDelta } from "../utils/temperature";
 
 const PENCIL_PATH =
   "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z";
@@ -318,7 +319,7 @@ export class RsHeroStatus extends LitElement {
             ${label} ${localize("hero.override", l)}
           </div>
           <div class="hero-target-value">
-            ${displayTemp !== null ? html`${displayTemp.toFixed(1)}\u00B0C` : "--"}
+            ${displayTemp !== null ? html`${formatTemp(displayTemp, this.hass)}${tempUnit(this.hass)}` : "--"}
           </div>
           ${this._countdown
             ? html`<div class="hero-target-countdown">${localize("hero.remaining", l, { time: this._countdown })}</div>`
@@ -331,7 +332,7 @@ export class RsHeroStatus extends LitElement {
       return html`
         <div class="hero-target">
           <div class="hero-target-label">${localize("hero.target", l)}</div>
-          <div class="hero-target-value">${targetTemp.toFixed(1)}\u00B0C</div>
+          <div class="hero-target-value">${formatTemp(targetTemp, this.hass)}${tempUnit(this.hass)}</div>
         </div>
       `;
     }
@@ -454,8 +455,8 @@ export class RsHeroStatus extends LitElement {
               <div class="hero-temps">
                 ${live.current_temp !== null
                   ? html`
-                      <span class="hero-current">${live.current_temp.toFixed(1)}</span>
-                      <span class="hero-unit">\u00B0C</span>
+                      <span class="hero-current">${formatTemp(live.current_temp, this.hass)}</span>
+                      <span class="hero-unit">${tempUnit(this.hass)}</span>
                     `
                   : html`<span class="hero-current" style="opacity: 0.3">--</span>`}
                 ${this._renderTargetSection(live.target_temp)}
@@ -469,7 +470,7 @@ export class RsHeroStatus extends LitElement {
               ${live.trv_setpoint != null
                 ? html`<div class="hero-metric">
                     <ha-icon icon="mdi:radiator"></ha-icon>
-                    ${localize("hero.trv_setpoint", this.hass?.language ?? "en", { value: live.trv_setpoint.toFixed(1) })}
+                    ${localize("hero.trv_setpoint", this.hass?.language ?? "en", { value: formatTemp(live.trv_setpoint, this.hass), unit: tempUnit(this.hass) })}
                   </div>`
                 : nothing}
               ${live.mold_surface_rh != null
@@ -481,7 +482,7 @@ export class RsHeroStatus extends LitElement {
               ${live.mold_prevention_active
                 ? html`<div class="hero-metric info">
                     <ha-icon icon="mdi:shield-check"></ha-icon>
-                    ${localize("card.mold_prevention", this.hass?.language ?? "en", { delta: String(live.mold_prevention_delta) })}
+                    ${localize("card.mold_prevention", this.hass?.language ?? "en", { delta: toDisplayDelta(live.mold_prevention_delta, this.hass).toFixed(0), unit: tempUnit(this.hass) })}
                   </div>`
                 : nothing}
             `

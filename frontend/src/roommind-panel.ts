@@ -8,6 +8,7 @@ import type {
 import { getEntitiesForArea } from "./utils/room-state";
 import { loadHaElements } from "./load-ha-elements";
 import { localize } from "./utils/localize";
+import { formatTemp, tempUnit } from "./utils/temperature";
 import { mdiEyeOff } from "./utils/icons";
 import "./components/rs-settings";
 import "./components/rs-analytics";
@@ -512,7 +513,8 @@ export class RoomMindPanel extends LitElement {
                 <div class="vacation-text">
                   <span class="vacation-title">${localize("vacation.banner_title", this.hass.language)}</span>
                   <span class="vacation-detail">${localize("vacation.banner_detail", this.hass.language, {
-                    temp: String(this._vacationTemp),
+                    temp: formatTemp(this._vacationTemp, this.hass),
+                    unit: tempUnit(this.hass),
                     date: this._vacationUntil
                       ? new Date(this._vacationUntil * 1000).toLocaleString(this.hass.language, { dateStyle: "medium", timeStyle: "short" })
                       : "—",

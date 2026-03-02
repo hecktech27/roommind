@@ -7,6 +7,7 @@ import type {
 import { getEntitiesForArea } from "../utils/room-state";
 import { localize } from "../utils/localize";
 import { openEntityInfo } from "../utils/events";
+import { tempUnit } from "../utils/temperature";
 
 @customElement("rs-device-section")
 export class RsDeviceSection extends LitElement {
@@ -268,7 +269,7 @@ export class RsDeviceSection extends LitElement {
       const ct = attrs.current_temperature as number | undefined;
       if (ct != null) displayValue = `${ct.toFixed(1)}\u00B0`;
     } else if (type === "temp") {
-      if (state && state !== "unknown" && state !== "unavailable") displayValue = `${Number(state).toFixed(1)}\u00B0C`;
+      if (state && state !== "unknown" && state !== "unavailable") displayValue = `${Number(state).toFixed(1)}${tempUnit(this.hass)}`;
     } else {
       if (state && state !== "unknown" && state !== "unavailable") displayValue = `${Math.round(Number(state))}%`;
     }
@@ -537,7 +538,7 @@ export class RsDeviceSection extends LitElement {
     const selected =
       type === "temp" ? this.selectedTempSensor : this.selectedHumiditySensor;
     const isSelected = selected === entityId;
-    const unit = type === "temp" ? "\u00B0C" : "%";
+    const unit = type === "temp" ? tempUnit(this.hass) : "%";
     const hasValue =
       currentValue &&
       currentValue !== "unknown" &&

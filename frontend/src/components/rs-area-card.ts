@@ -5,6 +5,7 @@ import { getModeClass, formatMode } from "../utils/room-state";
 import { modeStyles } from "../styles/shared-mode-styles";
 import { localize } from "../utils/localize";
 import { mdiEyeOff } from "../utils/icons";
+import { formatTemp, tempUnit, toDisplayDelta } from "../utils/temperature";
 
 // mdi:brain
 const BRAIN_PATH =
@@ -346,8 +347,8 @@ export class RsAreaCard extends LitElement {
       <div class="temp-section">
         ${live.current_temp !== null
           ? html`
-              <span class="current-temp">${live.current_temp.toFixed(1)}</span>
-              <span class="temp-unit">\u00B0C</span>
+              <span class="current-temp">${formatTemp(live.current_temp, this.hass)}</span>
+              <span class="temp-unit">${tempUnit(this.hass)}</span>
             `
           : html`<span class="no-temp">--</span>`}
         ${this._renderTargetInfo(live)}
@@ -370,7 +371,7 @@ export class RsAreaCard extends LitElement {
           ${live.mold_prevention_active
             ? html`<span class="mold-badge prevention">
                 <ha-icon icon="mdi:shield-check"></ha-icon>
-                ${localize("card.mold_prevention", this.hass.language, { delta: String(live.mold_prevention_delta) })}
+                ${localize("card.mold_prevention", this.hass.language, { delta: toDisplayDelta(live.mold_prevention_delta, this.hass).toFixed(0), unit: tempUnit(this.hass) })}
               </span>`
             : nothing}
           ${showMpcIcon
@@ -391,7 +392,7 @@ export class RsAreaCard extends LitElement {
 
     return html`
       <span class="target-info">
-        ${localize("card.target", this.hass.language)} <span class="target-value">${live.target_temp.toFixed(1)}\u00B0C</span>
+        ${localize("card.target", this.hass.language)} <span class="target-value">${formatTemp(live.target_temp, this.hass)}${tempUnit(this.hass)}</span>
         ${live.override_active
           ? html`<ha-icon class="override-icon" icon="mdi:timer-outline"></ha-icon>`
           : nothing}

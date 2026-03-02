@@ -482,3 +482,136 @@ class TestMakeTargetResolverMoldDelta:
         assert resolver(now) == 24.0
         assert resolver(now + 300) == 24.0
         assert resolver(now + 3600) == 24.0
+
+
+class TestFahrenheitBlockConversion:
+    """Tests for Fahrenheit temperature handling in schedule resolution."""
+
+    def test_block_temp_converter_converts_fahrenheit_to_celsius(self):
+        """resolve_target_at_time applies block_temp_converter to schedule block temps."""
+        from datetime import datetime
+
+        dt = datetime(2025, 1, 6, 10, 0, 0)  # Monday 10:00
+        ts = dt.timestamp()
+        schedule_blocks = {
+            "monday": [
+                {
+                    "from": "08:00:00",
+                    "to": "12:00:00",
+                    # Block temp stored in Fahrenheit: 71.6°F = 22°C
+                    "data": {"temperature": 71.6},
+                },
+            ],
+        }
+        # Converter simulates Fahrenheit → Celsius
+        converter = lambda v: (v - 32) * 5 / 9  # noqa: E731
+
+        result = resolve_target_at_time(
+            ts=ts,
+            schedule_blocks=schedule_blocks,
+            override_until=None,
+            override_temp=None,
+            vacation_until=None,
+            vacation_temp=None,
+            comfort_temp=21.0,
+            eco_temp=18.0,
+            block_temp_converter=converter,
+        )
+        import pytest as _pytest
+
+        assert result == _pytest.approx(22.0, abs=0.1)
+
+    def test_block_temp_converter_not_applied_without_block_temp(self):
+        """Converter is not called when block has no temperature data."""
+        from datetime import datetime
+
+        dt = datetime(2025, 1, 6, 10, 0, 0)  # Monday 10:00
+        ts = dt.timestamp()
+        schedule_blocks = {
+            "monday": [
+                {
+                    "from": "08:00:00",
+                    "to": "12:00:00",
+                    "data": {},  # no temperature
+                },
+            ],
+        }
+        converter_called = False
+
+        def converter(v):
+            nonlocal converter_called
+            converter_called = True
+            return v
+
+        result = resolve_target_at_time(
+            ts=ts,
+            schedule_blocks=schedule_blocks,
+            override_until=None,
+            override_temp=None,
+            vacation_until=None,
+            vacation_temp=None,
+            comfort_temp=21.0,
+            eco_temp=18.0,
+            block_temp_converter=converter,
+        )
+        assert result == 21.0  # falls back to comfort_temp
+        assert not converter_called
+
+    def test_make_target_resolver_fahrenheit_block_conversion(self):
+        """make_target_resolver with Fahrenheit hass converts block temps to Celsius."""
+        from datetime import datetime
+        from homeassistant.const import UnitOfTemperature
+
+        hass = _make_hass()
+        hass.config.units.temperature_unit = UnitOfTemperature.FAHRENHEIT
+
+        room = _make_room(comfort_temp=21.0, eco_temp=18.0)
+        settings: dict = {}
+
+        # Monday 10:00 schedule block with 71.6°F
+        dt = datetime(2025, 1, 6, 10, 0, 0)
+        ts = dt.timestamp()
+        schedule_blocks = {
+            "monday": [
+                {
+                    "from": "08:00:00",
+                    "to": "12:00:00",
+                    "data": {"temperature": 71.6},  # 71.6°F = 22°C
+                },
+            ],
+        }
+
+        resolver = make_target_resolver(
+            schedule_blocks, room, settings, hass=hass,
+        )
+        import pytest as _pytest
+
+        assert resolver(ts) == _pytest.approx(22.0, abs=0.1)
+
+    def test_make_target_resolver_celsius_no_conversion(self):
+        """make_target_resolver with Celsius hass does not alter block temps."""
+        from datetime import datetime
+        from homeassistant.const import UnitOfTemperature
+
+        hass = _make_hass()
+        hass.config.units.temperature_unit = UnitOfTemperature.CELSIUS
+
+        room = _make_room(comfort_temp=21.0, eco_temp=18.0)
+        settings: dict = {}
+
+        dt = datetime(2025, 1, 6, 10, 0, 0)
+        ts = dt.timestamp()
+        schedule_blocks = {
+            "monday": [
+                {
+                    "from": "08:00:00",
+                    "to": "12:00:00",
+                    "data": {"temperature": 22.5},
+                },
+            ],
+        }
+
+        resolver = make_target_resolver(
+            schedule_blocks, room, settings, hass=hass,
+        )
+        assert resolver(ts) == 22.5

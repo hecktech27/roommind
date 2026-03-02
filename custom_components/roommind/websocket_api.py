@@ -459,6 +459,7 @@ async def _compute_target_forecast(
         read_schedule_blocks,
         resolve_target_at_time,
     )
+    from .temp_utils import ha_temp_to_celsius
 
     comfort_temp = room.get("comfort_temp", 21.0)
     eco_temp = room.get("eco_temp", 17.0)
@@ -472,6 +473,9 @@ async def _compute_target_forecast(
     entity_id = get_active_schedule_entity(hass, room)
     schedule_blocks = await read_schedule_blocks(hass, entity_id) if entity_id else None
 
+    _hass = hass
+    converter = lambda v: ha_temp_to_celsius(_hass, v)  # noqa: E731
+
     # Generate forecast points
     now = time.time()
     end_ts = now + hours * 3600
@@ -484,6 +488,7 @@ async def _compute_target_forecast(
             vacation_until, vacation_temp,
             comfort_temp, eco_temp,
             presence_away=presence_away,
+            block_temp_converter=converter,
         )
         target += mold_prevention_delta
         result.append({"ts": round(ts, 1), "target_temp": round(target, 1)})

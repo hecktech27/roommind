@@ -537,6 +537,60 @@ async def test_async_apply_backward_compat():
     assert temp_arg == HEATING_BOOST_TARGET
 
 
+@pytest.mark.asyncio
+async def test_mpc_apply_heating_fahrenheit():
+    """set_temperature uses Fahrenheit when HA is configured for °F."""
+    from homeassistant.const import UnitOfTemperature
+    from custom_components.roommind.mpc_controller import HEATING_BOOST_TARGET
+
+    hass = build_hass()
+    hass.config.units.temperature_unit = UnitOfTemperature.FAHRENHEIT
+
+    room = make_room()
+    model_mgr = RoomModelManager()
+    ctrl = MPCController(
+        hass, room, model_manager=model_mgr,
+        outdoor_temp=5.0, settings={}, has_external_sensor=True,
+    )
+    await ctrl.async_apply("heating", 21.0)
+
+    calls = hass.services.async_call.call_args_list
+    set_temp_calls = [c for c in calls if c[0][1] == "set_temperature"]
+    assert set_temp_calls
+
+    # HEATING_BOOST_TARGET (30°C) → 86°F
+    expected_f = HEATING_BOOST_TARGET * 9 / 5 + 32
+    temp_arg = set_temp_calls[0][0][2]["temperature"]
+    assert temp_arg == pytest.approx(expected_f)
+
+
+@pytest.mark.asyncio
+async def test_mpc_apply_cooling_fahrenheit():
+    """Cooling set_temperature uses Fahrenheit when HA is configured for °F."""
+    from homeassistant.const import UnitOfTemperature
+
+    hass = build_hass()
+    hass.config.units.temperature_unit = UnitOfTemperature.FAHRENHEIT
+
+    room = make_room(thermostats=[], acs=["climate.ac"])
+    model_mgr = RoomModelManager()
+    ctrl = MPCController(
+        hass, room, model_manager=model_mgr,
+        outdoor_temp=30.0, settings={}, has_external_sensor=True,
+    )
+    # Apply cooling with target 23°C
+    await ctrl.async_apply("cooling", 23.0)
+
+    calls = hass.services.async_call.call_args_list
+    set_temp_calls = [c for c in calls if c[0][1] == "set_temperature"]
+    assert set_temp_calls
+
+    # 23°C → 73.4°F
+    expected_f = 23.0 * 9 / 5 + 32
+    temp_arg = set_temp_calls[0][0][2]["temperature"]
+    assert temp_arg == pytest.approx(expected_f)
+
+
 # ---------------------------------------------------------------------------
 # get_can_heat_cool unit tests
 # ---------------------------------------------------------------------------

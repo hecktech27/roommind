@@ -25,6 +25,7 @@ def resolve_target_at_time(
     comfort_temp: float,
     eco_temp: float,
     presence_away: bool = False,
+    block_temp_converter: "Callable[[float], float] | None" = None,
 ) -> float:
     """Resolve what the target temp would be at a specific timestamp."""
     # 1. Override
@@ -53,7 +54,8 @@ def resolve_target_at_time(
             block_temp = data.get("temperature")
             if block_temp is not None:
                 try:
-                    return float(block_temp)
+                    val = float(block_temp)
+                    return block_temp_converter(val) if block_temp_converter else val
                 except (ValueError, TypeError):
                     pass
             return comfort_temp
@@ -133,6 +135,7 @@ def make_target_resolver(
     schedule_blocks: dict | None,
     room: dict,
     settings: dict,
+    hass: "HomeAssistant | None" = None,
     presence_away: bool = False,
     mold_prevention_delta: float = 0.0,
 ) -> Callable[[float], float]:
@@ -144,6 +147,12 @@ def make_target_resolver(
     vacation_until = settings.get("vacation_until")
     vacation_temp = settings.get("vacation_temp")
 
+    converter: Callable[[float], float] | None = None
+    if hass is not None:
+        from .temp_utils import ha_temp_to_celsius
+        _hass = hass
+        converter = lambda v: ha_temp_to_celsius(_hass, v)  # noqa: E731
+
     def resolver(ts: float) -> float:
         base = resolve_target_at_time(
             ts, schedule_blocks,
@@ -151,6 +160,7 @@ def make_target_resolver(
             vacation_until, vacation_temp,
             comfort_temp, eco_temp,
             presence_away=presence_away,
+            block_temp_converter=converter,
         )
         return base + mold_prevention_delta
     return resolver

@@ -2134,3 +2134,85 @@ class TestMoldRiskDetection:
         room = data["rooms"]["living_room_abc12345"]
         assert room["mold_risk_level"] == "critical"
         assert room["mold_surface_rh"] == pytest.approx(80.0, abs=0.1)
+
+
+class TestFahrenheitConversion:
+    """Tests for Fahrenheit temperature conversion at system boundaries."""
+
+    @pytest.mark.asyncio
+    async def test_fahrenheit_sensor_converted_to_celsius(
+        self, hass, mock_config_entry
+    ):
+        """When HA is in Fahrenheit, sensor temps are converted to Celsius internally."""
+        from homeassistant.const import UnitOfTemperature
+
+        hass.config.units.temperature_unit = UnitOfTemperature.FAHRENHEIT
+
+        store = _make_store_mock({"living_room_abc12345": SAMPLE_ROOM})
+        hass.data = {"roommind": {"store": store}}
+
+        # Sensor reports 64.4°F (= 18°C), outdoor 50°F (= 10°C)
+        hass.states.get = MagicMock(
+            side_effect=make_mock_states_get(
+                temp="64.4",
+                humidity="55.0",
+                outdoor_temp="50",
+            ),
+        )
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        data = await coordinator._async_update_data()
+
+        room = data["rooms"]["living_room_abc12345"]
+        # Internal current_temp should be Celsius (~18°C)
+        assert room["current_temp"] == pytest.approx(18.0, abs=0.1)
+        # Target temp should remain in Celsius (comfort_temp=21°C stored in Celsius)
+        assert room["target_temp"] == pytest.approx(21.0, abs=0.1)
+        # Mode should be heating (18°C < 21°C target)
+        assert room["mode"] == "heating"
+
+    @pytest.mark.asyncio
+    async def test_valve_protection_set_temperature_in_fahrenheit(
+        self, hass, mock_config_entry
+    ):
+        """Valve protection set_temperature uses Fahrenheit when HA is in °F mode."""
+        from homeassistant.const import UnitOfTemperature
+        from custom_components.roommind.const import HEATING_BOOST_TARGET
+
+        hass.config.units.temperature_unit = UnitOfTemperature.FAHRENHEIT
+
+        store = _make_store_mock({"living_room_abc12345": SAMPLE_ROOM})
+        store.get_settings.return_value = {
+            "valve_protection_enabled": True,
+            "valve_protection_interval_days": 7,
+        }
+        store.async_save_settings = AsyncMock()
+        hass.data = {"roommind": {"store": store}}
+        hass.states.get = MagicMock(
+            side_effect=make_mock_states_get(temp="69.8"),  # 69.8°F ≈ 21°C
+        )
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        coordinator._valve_last_actuation["climate.living_room"] = (
+            time.time() - 8 * 86400
+        )
+        coordinator._valve_protection_count = 119
+        await coordinator._async_update_data()
+
+        assert "climate.living_room" in coordinator._valve_cycling
+
+        # Find set_temperature calls for the cycling valve
+        set_temp_calls = [
+            c
+            for c in hass.services.async_call.call_args_list
+            if c[0][0] == "climate"
+            and c[0][1] == "set_temperature"
+            and c[0][2].get("entity_id") == "climate.living_room"
+        ]
+        assert set_temp_calls
+        # HEATING_BOOST_TARGET is 30°C → 86°F
+        expected_f = HEATING_BOOST_TARGET * 9 / 5 + 32  # 86°F
+        temp_arg = set_temp_calls[0][0][2]["temperature"]
+        assert temp_arg == pytest.approx(expected_f)

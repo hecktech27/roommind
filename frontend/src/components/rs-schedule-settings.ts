@@ -4,6 +4,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { HomeAssistant, ScheduleEntry } from "../types";
 import { localize } from "../utils/localize";
 import { openEntityInfo } from "../utils/events";
+import { formatTemp, tempUnit, toDisplay, toCelsius, tempStep, tempRange } from "../utils/temperature";
 
 @customElement("rs-schedule-settings")
 export class RsScheduleSettings extends LitElement {
@@ -349,9 +350,9 @@ export class RsScheduleSettings extends LitElement {
         : html`<div class="no-schedules">${localize("schedule.no_schedules", l)}</div>`}
 
       <div class="view-temps">
-        ${localize("schedule.view_comfort", l, { temp: String(this.comfortTemp) })}
+        ${localize("schedule.view_comfort", l, { temp: formatTemp(this.comfortTemp, this.hass), unit: tempUnit(this.hass) })}
         \u00A0\u00B7\u00A0
-        ${localize("schedule.view_eco", l, { temp: String(this.ecoTemp) })}
+        ${localize("schedule.view_eco", l, { temp: formatTemp(this.ecoTemp, this.hass), unit: tempUnit(this.hass) })}
       </div>
 
       ${this.scheduleSelectorEntity
@@ -377,11 +378,11 @@ export class RsScheduleSettings extends LitElement {
           <ha-textfield
             type="number"
             label=${localize("schedule.comfort_label", l)}
-            suffix="\u00B0C"
-            .value=${String(this.comfortTemp)}
-            step="0.5"
-            min="5"
-            max="35"
+            suffix=${tempUnit(this.hass)}
+            .value=${String(toDisplay(this.comfortTemp, this.hass))}
+            step=${tempStep(this.hass)}
+            min=${tempRange(5, 35, this.hass).min}
+            max=${tempRange(5, 35, this.hass).max}
             @change=${this._onComfortTempChange}
           ></ha-textfield>
         </div>
@@ -389,11 +390,11 @@ export class RsScheduleSettings extends LitElement {
           <ha-textfield
             type="number"
             label=${localize("schedule.eco_label", l)}
-            suffix="\u00B0C"
-            .value=${String(this.ecoTemp)}
-            step="0.5"
-            min="5"
-            max="35"
+            suffix=${tempUnit(this.hass)}
+            .value=${String(toDisplay(this.ecoTemp, this.hass))}
+            step=${tempStep(this.hass)}
+            min=${tempRange(5, 35, this.hass).min}
+            max=${tempRange(5, 35, this.hass).max}
             @change=${this._onEcoTempChange}
           ></ha-textfield>
         </div>
@@ -616,12 +617,12 @@ export class RsScheduleSettings extends LitElement {
     if (isOn) {
       const blockTemp = entityState.attributes?.temperature as number | undefined;
       if (blockTemp != null) {
-        return localize("schedule.from_schedule", l, { temp: String(blockTemp) });
+        return localize("schedule.from_schedule", l, { temp: String(blockTemp), unit: tempUnit(this.hass) });
       }
-      return localize("schedule.fallback", l, { temp: String(this.comfortTemp) });
+      return localize("schedule.fallback", l, { temp: formatTemp(this.comfortTemp, this.hass), unit: tempUnit(this.hass) });
     }
 
-    return localize("schedule.eco_detail", l, { temp: String(this.ecoTemp) });
+    return localize("schedule.eco_detail", l, { temp: formatTemp(this.ecoTemp, this.hass), unit: tempUnit(this.hass) });
   }
 
   private _getScheduleEntities(): string[] {
@@ -702,7 +703,7 @@ export class RsScheduleSettings extends LitElement {
     this.dispatchEvent(
       new CustomEvent("comfort-temp-changed", {
         detail: {
-          value: parseFloat(target.value) || 21.0,
+          value: toCelsius(parseFloat(target.value) || toDisplay(21.0, this.hass), this.hass),
         },
         bubbles: true,
         composed: true,
@@ -715,7 +716,7 @@ export class RsScheduleSettings extends LitElement {
     this.dispatchEvent(
       new CustomEvent("eco-temp-changed", {
         detail: {
-          value: parseFloat(target.value) || 17.0,
+          value: toCelsius(parseFloat(target.value) || toDisplay(17.0, this.hass), this.hass),
         },
         bubbles: true,
         composed: true,

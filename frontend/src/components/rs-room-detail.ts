@@ -15,6 +15,7 @@ import "./rs-device-section";
 import "./rs-section-card";
 import { localize } from "../utils/localize";
 import { fireSaveStatus } from "../utils/events";
+import { formatTemp, tempUnit, toDisplay, toCelsius, tempStep, tempRange } from "../utils/temperature";
 
 @customElement("rs-room-detail")
 export class RsRoomDetail extends LitElement {
@@ -867,8 +868,8 @@ export class RsRoomDetail extends LitElement {
               @click=${() => isActive ? this._onClearOverride() : this._onOverridePreset(t)}
             >
               <ha-icon icon=${t === "boost" ? "mdi:fire" : t === "eco" ? "mdi:leaf" : "mdi:thermometer"}></ha-icon>
-              ${t === "boost" ? `${localize("override.comfort", this.hass.language)} ${this._comfortTemp}\u00B0C`
-                : t === "eco" ? `${localize("override.eco", this.hass.language)} ${this._ecoTemp}\u00B0C`
+              ${t === "boost" ? `${localize("override.comfort", this.hass.language)} ${formatTemp(this._comfortTemp, this.hass)}${tempUnit(this.hass)}`
+                : t === "eco" ? `${localize("override.eco", this.hass.language)} ${formatTemp(this._ecoTemp, this.hass)}${tempUnit(this.hass)}`
                 : localize("override.custom", this.hass.language)}
             </button>
           `;
@@ -882,13 +883,13 @@ export class RsRoomDetail extends LitElement {
                     <span>${localize("override.target", this.hass.language)}</span>
                     <input
                       type="number"
-                      min="5"
-                      max="35"
-                      step="0.5"
-                      .value=${String(this._overrideCustomTemp)}
+                      min=${tempRange(5, 35, this.hass).min}
+                      max=${tempRange(5, 35, this.hass).max}
+                      step=${tempStep(this.hass)}
+                      .value=${String(toDisplay(this._overrideCustomTemp, this.hass))}
                       @input=${this._onOverrideCustomTempInput}
                     />
-                    <span>\u00B0C</span>
+                    <span>${tempUnit(this.hass)}</span>
                   </div>
                 `
               : nothing}
@@ -927,7 +928,7 @@ export class RsRoomDetail extends LitElement {
   }
 
   private _onOverrideCustomTempInput(e: Event): void {
-    this._overrideCustomTemp = Number((e.target as HTMLInputElement).value) || 21;
+    this._overrideCustomTemp = toCelsius(Number((e.target as HTMLInputElement).value) || toDisplay(21, this.hass), this.hass);
   }
 
   private async _onOverrideActivate(hours: number): Promise<void> {

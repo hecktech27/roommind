@@ -21,6 +21,7 @@ from .const import (
     MODE_IDLE,
 )
 from .mpc_optimizer import MPCOptimizer, MPCPlan
+from .temp_utils import celsius_to_ha_temp
 from .thermal_model import RoomModelManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -394,16 +395,17 @@ class MPCController:
             and self.climate_mode not in (CLIMATE_MODE_HEAT_ONLY, CLIMATE_MODE_COOL_ONLY)
             and mode != MODE_IDLE
         ):
+            ha_target = celsius_to_ha_temp(self.hass, target_temp)
             for eid in thermostats:
                 if can_heat:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": target_temp})
+                    await self._call("set_temperature", {"entity_id": eid, "temperature": ha_target})
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
             for eid in self.acs:
                 if can_cool:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "cool"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": target_temp})
+                    await self._call("set_temperature", {"entity_id": eid, "temperature": ha_target})
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
             return
@@ -421,15 +423,17 @@ class MPCController:
                 trv_target = min(HEATING_BOOST_TARGET, trv_target)
             else:
                 trv_target = HEATING_BOOST_TARGET if self.has_external_sensor else target_temp
+            ha_trv = celsius_to_ha_temp(self.hass, trv_target)
             for eid in thermostats:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
-                await self._call("set_temperature", {"entity_id": eid, "temperature": trv_target})
+                await self._call("set_temperature", {"entity_id": eid, "temperature": ha_trv})
             for eid in self.acs:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
         elif mode == MODE_COOLING:
+            ha_target = celsius_to_ha_temp(self.hass, target_temp)
             for eid in self.acs:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "cool"})
-                await self._call("set_temperature", {"entity_id": eid, "temperature": target_temp})
+                await self._call("set_temperature", {"entity_id": eid, "temperature": ha_target})
             for eid in thermostats:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
         elif mode == MODE_IDLE:

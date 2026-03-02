@@ -105,6 +105,7 @@ export interface HomeAssistant {
   entities: Record<string, HassEntityRegistryEntry>;
   devices: Record<string, HassDeviceRegistryEntry>;
   language: string;
+  config: { unit_system: { temperature: string } };
 }
 
 export interface HassArea {

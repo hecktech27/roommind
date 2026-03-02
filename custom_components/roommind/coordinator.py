@@ -18,6 +18,7 @@ from .history_store import HistoryStore
 from .mpc_controller import DEFAULT_OUTDOOR_TEMP_FALLBACK, MPCController, get_can_heat_cool, is_mpc_active
 from .sensor_utils import read_sensor_value
 from .solar import compute_q_solar_norm
+from .temp_utils import celsius_delta_to_ha, celsius_to_ha_temp, ha_temp_to_celsius, ha_temp_unit_str
 from .thermal_model import RoomModelManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,9 +90,10 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         # Read outdoor sensors from global settings
         settings = store.get_settings()
-        self.outdoor_temp = read_sensor_value(
+        raw_outdoor = read_sensor_value(
             self.hass, settings.get("outdoor_temp_sensor"), "global", "outdoor temperature"
         )
+        self.outdoor_temp = ha_temp_to_celsius(self.hass, raw_outdoor) if raw_outdoor is not None else None
         self.outdoor_humidity = read_sensor_value(
             self.hass, settings.get("outdoor_humidity_sensor"), "global", "outdoor humidity"
         )
@@ -222,13 +224,15 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         has_external_sensor = bool(room.get("temperature_sensor"))
 
-        current_temp = read_sensor_value(
+        raw_temp = read_sensor_value(
             self.hass, room.get("temperature_sensor"), area_id, "temperature"
         )
+        current_temp = ha_temp_to_celsius(self.hass, raw_temp) if raw_temp is not None else None
 
         # Fallback: read current_temperature from first thermostat/AC if no external sensor
         if current_temp is None and not has_external_sensor:
-            current_temp = self._read_device_temp(room)
+            raw_dev = self._read_device_temp(room)
+            current_temp = ha_temp_to_celsius(self.hass, raw_dev) if raw_dev is not None else None
 
         current_humidity = read_sensor_value(
             self.hass, room.get("humidity_sensor"), area_id, "humidity"
@@ -318,7 +322,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                                     message=(
                                         f"Mold prevention active in {area_name}: "
                                         f"temperature raised by "
-                                        f"{mold_prevention_temp_delta:.0f}°C"
+                                        f"{celsius_delta_to_ha(self.hass, mold_prevention_temp_delta):.0f}{ha_temp_unit_str(self.hass)}"
                                     ),
                                     title="RoomMind: Mold Prevention",
                                     tag_suffix="prevention",
@@ -359,6 +363,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         presence_away = self._is_presence_away(room, settings)
         target_resolver = make_target_resolver(
             schedule_blocks, room, settings,
+            hass=self.hass,
             presence_away=presence_away,
             mold_prevention_delta=mold_prevention_temp_delta,
         )
@@ -625,7 +630,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     )
                     await self.hass.services.async_call(
                         "climate", "set_temperature",
-                        {"entity_id": eid, "temperature": HEATING_BOOST_TARGET},
+                        {"entity_id": eid, "temperature": celsius_to_ha_temp(self.hass, HEATING_BOOST_TARGET)},
                         blocking=True,
                     )
                     self._valve_cycling[eid] = now
@@ -746,7 +751,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             block_temp = state.attributes.get("temperature")
             if block_temp is not None:
                 try:
-                    return float(block_temp)
+                    return ha_temp_to_celsius(self.hass, float(block_temp))
                 except (ValueError, TypeError):
                     pass
             return comfort_temp
@@ -810,7 +815,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             )
             forecasts = response.get(weather_entity, {}).get("forecast", [])
             if isinstance(forecasts, list) and forecasts:
-                return forecasts
+                return self._convert_forecast_temps(forecasts)
         except Exception:  # noqa: BLE001
             _LOGGER.debug(
                 "weather.get_forecasts service call failed for %s, "
@@ -824,8 +829,18 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             return []
         forecast = state.attributes.get("forecast")
         if isinstance(forecast, list):
-            return forecast
+            return self._convert_forecast_temps(forecast)
         return []
+
+    def _convert_forecast_temps(self, forecasts: list[dict]) -> list[dict]:
+        """Convert forecast temperatures from HA units to Celsius."""
+        result = []
+        for f in forecasts:
+            if "temperature" in f:
+                result.append({**f, "temperature": ha_temp_to_celsius(self.hass, f["temperature"])})
+            else:
+                result.append(f)
+        return result
 
     @staticmethod
     def _extract_cloud_series(forecast: list[dict]) -> list[float | None] | None:

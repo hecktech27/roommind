@@ -6,6 +6,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { HomeAssistant, GlobalSettings, HassEntity, RoomConfig, NotificationTarget } from "../types";
 import { localize } from "../utils/localize";
 import { fireSaveStatus } from "../utils/events";
+import { formatTemp, tempUnit, toDisplay, toCelsius, tempStep, tempRange, toDisplayDelta } from "../utils/temperature";
 
 @customElement("rs-settings")
 export class RsSettings extends LitElement {
@@ -542,13 +543,13 @@ export class RsSettings extends LitElement {
                     </div>
                     <div class="threshold-field">
                       <ha-textfield
-                        .value=${String(this._vacationTemp)}
+                        .value=${String(toDisplay(this._vacationTemp, this.hass))}
                         .label=${localize("vacation.setback_temp", l)}
-                        .suffix=${"°C"}
+                        .suffix=${tempUnit(this.hass)}
                         type="number"
-                        step="0.5"
-                        min="5"
-                        max="25"
+                        step=${tempStep(this.hass)}
+                        min=${tempRange(5, 25, this.hass).min}
+                        max=${tempRange(5, 25, this.hass).max}
                         @change=${this._onVacationTempChanged}
                       ></ha-textfield>
                     </div>
@@ -702,26 +703,26 @@ export class RsSettings extends LitElement {
             <div class="threshold-grid">
               <div class="threshold-field">
                 <ha-textfield
-                  .value=${String(this._outdoorCoolingMin)}
+                  .value=${String(toDisplay(this._outdoorCoolingMin, this.hass))}
                   .label=${localize("settings.outdoor_cooling_min", l)}
-                  .suffix=${"°C"}
+                  .suffix=${tempUnit(this.hass)}
                   type="number"
-                  step="1"
-                  min="-10"
-                  max="40"
+                  step=${tempStep(this.hass)}
+                  min=${tempRange(-10, 40, this.hass).min}
+                  max=${tempRange(-10, 40, this.hass).max}
                   @change=${this._onOutdoorCoolingMinChanged}
                 ></ha-textfield>
                 <span class="field-hint">${localize("settings.outdoor_cooling_min_hint", l)}</span>
               </div>
               <div class="threshold-field">
                 <ha-textfield
-                  .value=${String(this._outdoorHeatingMax)}
+                  .value=${String(toDisplay(this._outdoorHeatingMax, this.hass))}
                   .label=${localize("settings.outdoor_heating_max", l)}
-                  .suffix=${"°C"}
+                  .suffix=${tempUnit(this.hass)}
                   type="number"
-                  step="1"
-                  min="0"
-                  max="40"
+                  step=${tempStep(this.hass)}
+                  min=${tempRange(0, 40, this.hass).min}
+                  max=${tempRange(0, 40, this.hass).max}
                   @change=${this._onOutdoorHeatingMaxChanged}
                 ></ha-textfield>
                 <span class="field-hint">${localize("settings.outdoor_heating_max_hint", l)}</span>
@@ -769,7 +770,7 @@ export class RsSettings extends LitElement {
                 ></ha-entity-picker>
                 ${outdoorTemp !== null
                   ? html`<div class="current-value">
-                      ${localize("settings.outdoor_current", l, { temp: String(outdoorTemp) })}
+                      ${localize("settings.outdoor_current", l, { temp: formatTemp(outdoorTemp, this.hass), unit: tempUnit(this.hass) })}
                     </div>`
                   : this._outdoorTempSensor
                     ? html`<div class="current-value muted">
@@ -912,9 +913,9 @@ export class RsSettings extends LitElement {
                       @selected=${this._onMoldIntensityChanged}
                       @closed=${(e: Event) => e.stopPropagation()}
                     >
-                      <mwc-list-item value="light">${localize("mold.intensity_light", l)}</mwc-list-item>
-                      <mwc-list-item value="medium">${localize("mold.intensity_medium", l)}</mwc-list-item>
-                      <mwc-list-item value="strong">${localize("mold.intensity_strong", l)}</mwc-list-item>
+                      <mwc-list-item value="light">${localize("mold.intensity_light", l, { delta: String(toDisplayDelta(1, this.hass)), unit: tempUnit(this.hass) })}</mwc-list-item>
+                      <mwc-list-item value="medium">${localize("mold.intensity_medium", l, { delta: String(toDisplayDelta(2, this.hass)), unit: tempUnit(this.hass) })}</mwc-list-item>
+                      <mwc-list-item value="strong">${localize("mold.intensity_strong", l, { delta: String(toDisplayDelta(3, this.hass)), unit: tempUnit(this.hass) })}</mwc-list-item>
                     </ha-select>
                     <span class="field-hint">${localize("mold.intensity_hint", l)}</span>
                   </div>
@@ -1119,7 +1120,7 @@ export class RsSettings extends LitElement {
   private _onVacationTempChanged(e: Event) {
     const value = parseFloat((e.target as HTMLInputElement).value);
     if (!isNaN(value)) {
-      this._vacationTemp = value;
+      this._vacationTemp = toCelsius(value, this.hass);
       this._autoSave();
     }
   }
@@ -1195,17 +1196,23 @@ export class RsSettings extends LitElement {
 
   private _onOutdoorCoolingMinChanged(e: Event) {
     const value = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(value) && value !== this._outdoorCoolingMin) {
-      this._outdoorCoolingMin = value;
-      this._autoSave();
+    if (!isNaN(value)) {
+      const celsius = toCelsius(value, this.hass);
+      if (celsius !== this._outdoorCoolingMin) {
+        this._outdoorCoolingMin = celsius;
+        this._autoSave();
+      }
     }
   }
 
   private _onOutdoorHeatingMaxChanged(e: Event) {
     const value = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(value) && value !== this._outdoorHeatingMax) {
-      this._outdoorHeatingMax = value;
-      this._autoSave();
+    if (!isNaN(value)) {
+      const celsius = toCelsius(value, this.hass);
+      if (celsius !== this._outdoorHeatingMax) {
+        this._outdoorHeatingMax = celsius;
+        this._autoSave();
+      }
     }
   }
 
