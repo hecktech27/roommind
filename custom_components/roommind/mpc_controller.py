@@ -441,6 +441,19 @@ class MPCController:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
 
     async def _call(self, service: str, data: dict) -> None:
+        eid = data.get("entity_id")
+        state = self.hass.states.get(eid) if eid else None
+
+        # Skip redundant commands (avoids IR blaster beeping every cycle)
+        if state:
+            if service == "set_hvac_mode" and state.state == data.get("hvac_mode"):
+                return
+            if service == "set_temperature":
+                current = state.attributes.get("temperature")
+                desired = data.get("temperature")
+                if current is not None and desired is not None and round(current, 1) == round(desired, 1):
+                    return
+
         try:
             await self.hass.services.async_call("climate", service, data, blocking=True)
         except Exception:  # noqa: BLE001
