@@ -76,12 +76,29 @@ async def _async_migrate_storage(hass: HomeAssistant) -> None:
                 _LOGGER.info("Migrated storage key from 'roomsense' to 'roommind'")
         except Exception:  # noqa: BLE001
             _LOGGER.warning("Failed to migrate storage key")
-    # Rename history CSV directory
+    # Migrate history CSV directory
     old_history = storage_dir / "roomsense_history"
     new_history = storage_dir / "roommind_history"
-    if old_history.exists() and not new_history.exists():
-        old_history.rename(new_history)
-        _LOGGER.info("Migrated history directory from 'roomsense_history' to 'roommind_history'")
+    if old_history.exists():
+        if not new_history.exists():
+            old_history.rename(new_history)
+            _LOGGER.info("Migrated history directory to 'roommind_history'")
+        else:
+            # Both exist — merge old CSVs into new (append old data before new)
+            for old_csv in old_history.iterdir():
+                new_csv = new_history / old_csv.name
+                if new_csv.exists():
+                    old_lines = old_csv.read_text().splitlines()
+                    new_lines = new_csv.read_text().splitlines()
+                    # old_lines[0] is header, old_lines[1:] is data
+                    # new_lines[0] is header, new_lines[1:] is new data
+                    merged = old_lines + new_lines[1:]
+                    new_csv.write_text("\n".join(merged) + "\n")
+                else:
+                    old_csv.rename(new_csv)
+            import shutil
+            shutil.rmtree(old_history)
+            _LOGGER.info("Merged old history into 'roommind_history'")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
