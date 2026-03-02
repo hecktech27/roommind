@@ -444,11 +444,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     exc_info=True,
                 )
         else:
-            # Climate control disabled — ensure all devices are off
-            try:
-                await controller.async_apply(MODE_IDLE, None, exclude_eids=cycling_eids)
-            except Exception:  # noqa: BLE001
-                pass
+            # Climate control disabled (learn-only) — do NOT send any commands
+            mode = MODE_IDLE
+            power_fraction = 0.0
 
         # Track valve actuation during normal heating
         if mode == MODE_HEATING:

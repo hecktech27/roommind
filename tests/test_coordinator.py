@@ -2146,6 +2146,54 @@ class TestMoldRiskDetection:
         assert room["mold_surface_rh"] == pytest.approx(80.0, abs=0.1)
 
 
+class TestClimateControlDisabled:
+    """Tests for learn-only mode (climate_control_active=False)."""
+
+    @pytest.mark.asyncio
+    async def test_no_service_calls_when_climate_control_disabled(
+        self, hass, mock_config_entry
+    ):
+        """When climate_control_active is False, no climate service calls are made."""
+        store = _make_store_mock({"living_room_abc12345": SAMPLE_ROOM})
+        store.get_settings.return_value = {"climate_control_active": False}
+        hass.data = {"roommind": {"store": store}}
+
+        hass.states.get = MagicMock(
+            side_effect=make_mock_states_get(temp="18.0", humidity="55.0"),
+        )
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+
+        # No climate.* service calls at all
+        climate_calls = [
+            c for c in hass.services.async_call.call_args_list
+            if c[0][0] == "climate"
+        ]
+        assert climate_calls == [], f"Expected no climate calls, got {climate_calls}"
+
+    @pytest.mark.asyncio
+    async def test_mode_is_idle_when_climate_control_disabled(
+        self, hass, mock_config_entry
+    ):
+        """Room mode should be idle when climate control is disabled."""
+        store = _make_store_mock({"living_room_abc12345": SAMPLE_ROOM})
+        store.get_settings.return_value = {"climate_control_active": False}
+        hass.data = {"roommind": {"store": store}}
+
+        hass.states.get = MagicMock(
+            side_effect=make_mock_states_get(temp="18.0", humidity="55.0"),
+        )
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        data = await coordinator._async_update_data()
+
+        room = data["rooms"]["living_room_abc12345"]
+        assert room["mode"] == "idle"
+
+
 class TestFahrenheitConversion:
     """Tests for Fahrenheit temperature conversion at system boundaries."""
 
