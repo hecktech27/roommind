@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import type {
   HomeAssistant,
   HassArea,
@@ -23,6 +23,7 @@ export class RsDeviceSection extends LitElement {
   @property({ type: String }) public heatingSystemType = "";
 
   @property({ type: Boolean }) public editing = false;
+  @state() private _systemTypeInfoExpanded = false;
 
   static styles = css`
     :host {
@@ -153,6 +154,30 @@ export class RsDeviceSection extends LitElement {
       margin-top: 12px;
       padding-top: 12px;
       border-top: 1px solid var(--divider-color, #eee);
+    }
+
+    .subtitle-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .info-icon {
+      --mdc-icon-size: 16px;
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      opacity: 0.6;
+    }
+    .info-icon:hover, .info-icon.info-active {
+      opacity: 1;
+      color: var(--primary-color);
+    }
+
+    .system-type-info {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--secondary-text-color);
+      padding: 8px 14px 4px;
     }
 
     ha-entity-picker {
@@ -462,25 +487,6 @@ export class RsDeviceSection extends LitElement {
         ` : nothing}
       </div>
 
-      ${this.selectedThermostats.size > 0 ? html`
-        <div class="device-group">
-          <div class="section-subtitle">${localize("devices.heating_system_type", this.hass.language)}</div>
-          <div style="padding: 0 14px;">
-            <ha-select
-              .value=${this.heatingSystemType || ""}
-              @selected=${this._onHeatingSystemTypeChange}
-              @closed=${(e: Event) => e.stopPropagation()}
-              fixedMenuPosition
-              style="width: 100%;"
-            >
-              <ha-list-item value="">${localize("devices.system_type_none", this.hass.language)}</ha-list-item>
-              <ha-list-item value="radiator">${localize("devices.system_type_radiator", this.hass.language)}</ha-list-item>
-              <ha-list-item value="underfloor">${localize("devices.system_type_underfloor", this.hass.language)}</ha-list-item>
-            </ha-select>
-          </div>
-        </div>
-      ` : nothing}
-
       <div class="entity-picker-wrap">
         <ha-entity-picker
           .hass=${this.hass}
@@ -491,6 +497,38 @@ export class RsDeviceSection extends LitElement {
           @value-changed=${this._onEntityPicked}
         ></ha-entity-picker>
       </div>
+
+      ${this.selectedThermostats.size > 0 ? html`
+        <div class="device-group">
+          <div class="subtitle-row">
+            <div class="section-subtitle">${localize("devices.heating_system_type", this.hass.language)}</div>
+            <ha-icon
+              class="info-icon ${this._systemTypeInfoExpanded ? "info-active" : ""}"
+              icon="mdi:information-outline"
+              @click=${() => { this._systemTypeInfoExpanded = !this._systemTypeInfoExpanded; }}
+            ></ha-icon>
+          </div>
+          ${this._systemTypeInfoExpanded ? html`
+            <div class="system-type-info">${localize("devices.heating_system_type_info", this.hass.language)}</div>
+          ` : nothing}
+          <ha-select
+            .value=${this.heatingSystemType || "standard"}
+            .options=${[
+              { value: "standard", label: localize("devices.system_type_none", this.hass.language) },
+              { value: "radiator", label: localize("devices.system_type_radiator", this.hass.language) },
+              { value: "underfloor", label: localize("devices.system_type_underfloor", this.hass.language) },
+            ]}
+            @selected=${this._onHeatingSystemTypeChange}
+            @closed=${(e: Event) => e.stopPropagation()}
+            fixedMenuPosition
+            style="width: 100%;"
+          >
+            <ha-list-item value="standard">${localize("devices.system_type_none", this.hass.language)}</ha-list-item>
+            <ha-list-item value="radiator">${localize("devices.system_type_radiator", this.hass.language)}</ha-list-item>
+            <ha-list-item value="underfloor">${localize("devices.system_type_underfloor", this.hass.language)}</ha-list-item>
+          </ha-select>
+        </div>
+      ` : nothing}
 
     `;
   }
@@ -709,7 +747,8 @@ export class RsDeviceSection extends LitElement {
   }
 
   private _onHeatingSystemTypeChange(e: Event) {
-    const value = getSelectValue(e) ?? "";
+    const raw = getSelectValue(e) ?? "";
+    const value = raw === "standard" ? "" : raw;
     this.dispatchEvent(
       new CustomEvent("heating-system-type-changed", {
         detail: { value },
