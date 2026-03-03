@@ -74,6 +74,27 @@ MOLD_PREVENTION_DELTAS = {"light": 1.0, "medium": 2.0, "strong": 3.0}
 MOLD_HYSTERESIS = 5.0                 # surface RH must drop this much below warning to clear
 MIN_MOLD_GROWTH_TEMP = 5.0            # °C — below this surface temp, mold risk negligible
 
+# Heating system profiles — residual heat modeling per system type
+# tau_minutes: exponential decay time constant of residual heat after heating stops
+# initial_fraction: fraction of beta_h at t=0 (fully charged thermal mass)
+# tau_charge_minutes: time constant for thermal mass to charge (how long heating must run)
+# min_run_minutes: minimum heating run time for the MPC optimizer
+HEATING_SYSTEM_PROFILES: dict[str, dict[str, float]] = {
+    "radiator": {
+        "tau_minutes": 10.0,
+        "initial_fraction": 0.3,
+        "tau_charge_minutes": 15.0,
+        "min_run_minutes": 10.0,
+    },
+    "underfloor": {
+        "tau_minutes": 90.0,
+        "initial_fraction": 0.85,
+        "tau_charge_minutes": 60.0,
+        "min_run_minutes": 30.0,
+    },
+}
+RESIDUAL_HEAT_CUTOFF = 0.02  # below this q_residual is treated as zero
+
 
 def build_override_live(room: dict) -> dict:
     """Build override fields for live data from a room config dict."""

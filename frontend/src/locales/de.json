@@ -125,6 +125,10 @@
   "devices.other_area": "Anderer Bereich",
   "devices.type_thermostat": "Thermostat",
   "devices.type_ac": "Klimaanlage",
+  "devices.heating_system_type": "Heizungstyp",
+  "devices.system_type_none": "Standard (kein Nachlauf)",
+  "devices.system_type_radiator": "Heizkörper",
+  "devices.system_type_underfloor": "Fußbodenheizung",
 
   "hero.window_open": "Fenster offen – pausiert",
   "card.window_open": "Fenster offen",

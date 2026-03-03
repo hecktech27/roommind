@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Callable
 
@@ -222,6 +223,8 @@ class MPCController:
         latitude: float = 0.0,
         longitude: float = 0.0,
         cloud_series: list[float | None] | None = None,
+        q_residual: float = 0.0,
+        heating_system_type: str = "",
     ) -> None:
         self.hass = hass
         self.room_config = room_config
@@ -240,6 +243,8 @@ class MPCController:
         self._latitude = latitude
         self._longitude = longitude
         self._cloud_series = cloud_series or []
+        self.q_residual = q_residual
+        self._heating_system_type = heating_system_type
 
         s = settings or {}
         self.outdoor_cooling_min = s.get("outdoor_cooling_min", DEFAULT_OUTDOOR_COOLING_MIN)
@@ -270,6 +275,7 @@ class MPCController:
         pred_std = self._model_manager.get_prediction_std(
             self._area_id, Q_check, current_temp or 20.0, T_out, PLAN_DT_MINUTES,
             q_solar=self.q_solar,
+            q_residual=self.q_residual,
         )
         if pred_std < MPC_MAX_PREDICTION_STD and self._has_enough_data(can_heat, can_cool):
             return self._evaluate_mpc(current_temp, target_temp)
@@ -310,6 +316,9 @@ class MPCController:
         # Build solar series from forecast cloud coverage
         solar_series = self._build_solar_series(horizon_blocks)
 
+        # Build residual heat series (decaying from current q_residual)
+        residual_series = self._build_residual_series(horizon_blocks)
+
         # Build target series with schedule lookahead for pre-heating/pre-cooling
         if self._target_resolver is not None:
             now = time.time()
@@ -321,6 +330,9 @@ class MPCController:
         else:
             target_series = [target_temp] * horizon_blocks
 
+        from .residual_heat import get_min_run_blocks
+        min_run = get_min_run_blocks(self._heating_system_type, PLAN_DT_MINUTES)
+
         optimizer = MPCOptimizer(
             model=model,
             can_heat=can_heat,
@@ -329,6 +341,7 @@ class MPCController:
             w_energy=self._w_energy,
             outdoor_cooling_min=self.outdoor_cooling_min,
             outdoor_heating_max=self.outdoor_heating_max,
+            min_run_blocks=min_run,
         )
 
         plan = optimizer.optimize(
@@ -337,6 +350,7 @@ class MPCController:
             target_series=target_series,
             dt_minutes=PLAN_DT_MINUTES,
             solar_series=solar_series,
+            residual_series=residual_series,
         )
         self.last_plan = plan
 
@@ -471,6 +485,23 @@ class MPCController:
             dt_minutes=PLAN_DT_MINUTES,
             cloud_series=cloud_per_block,
         )
+
+    def _build_residual_series(self, n_blocks: int) -> list[float] | None:
+        """Build decaying residual heat series for MPC horizon."""
+        if self.q_residual <= 0 or not self._heating_system_type:
+            return None
+        from .const import HEATING_SYSTEM_PROFILES, RESIDUAL_HEAT_CUTOFF
+        profile = HEATING_SYSTEM_PROFILES.get(self._heating_system_type)
+        if not profile:
+            return None
+        tau = profile["tau_minutes"]
+        if tau <= 0:
+            return None
+        series: list[float] = []
+        for i in range(n_blocks):
+            q = self.q_residual * math.exp(-i * PLAN_DT_MINUTES / tau)
+            series.append(q if q >= RESIDUAL_HEAT_CUTOFF else 0.0)
+        return series
 
     async def async_apply(
         self,

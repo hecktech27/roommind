@@ -53,6 +53,7 @@ export class RsRoomDetail extends LitElement {
   @state() private _editingPresence = false;
   @state() private _selectedPresencePersons: string[] = [];
   @state() private _displayName = "";
+  @state() private _heatingSystemType = "";
 
 
   private _prevAreaId: string | null = null;
@@ -426,6 +427,7 @@ export class RsRoomDetail extends LitElement {
       this._ecoTemp = this.config.eco_temp ?? 17.0;
       this._selectedPresencePersons = this.config.presence_persons ?? [];
       this._displayName = this.config.display_name ?? "";
+      this._heatingSystemType = this.config.heating_system_type ?? "";
     } else {
       this._selectedThermostats = new Set();
       this._selectedAcs = new Set();
@@ -441,6 +443,7 @@ export class RsRoomDetail extends LitElement {
       this._ecoTemp = 17.0;
       this._selectedPresencePersons = [];
       this._displayName = "";
+      this._heatingSystemType = "";
     }
     this._dirty = false;
 
@@ -530,6 +533,7 @@ export class RsRoomDetail extends LitElement {
               .selectedWindowSensors=${this._selectedWindowSensors}
               .windowOpenDelay=${this._windowOpenDelay}
               .windowCloseDelay=${this._windowCloseDelay}
+              .heatingSystemType=${this._heatingSystemType}
               @climate-toggle=${this._onClimateToggle}
               @device-type-change=${this._onDeviceTypeChange}
               @sensor-selected=${this._onSensorSelected}
@@ -537,6 +541,7 @@ export class RsRoomDetail extends LitElement {
               @window-open-delay-changed=${this._onWindowOpenDelayChanged}
               @window-close-delay-changed=${this._onWindowCloseDelayChanged}
               @external-entity-added=${this._onExternalEntityAdded}
+              @heating-system-type-changed=${this._onHeatingSystemTypeChanged}
             ></rs-device-section>
           </rs-section-card>
 
@@ -653,6 +658,11 @@ export class RsRoomDetail extends LitElement {
     this._autoSave();
   }
 
+  private _onHeatingSystemTypeChanged(e: CustomEvent<{ value: string }>) {
+    this._heatingSystemType = e.detail.value;
+    this._autoSave();
+  }
+
   private _onExternalEntityAdded(
     e: CustomEvent<{ entityId: string; category: "climate" | "temp" | "humidity" | "window"; detectedType?: "thermostat" | "ac" }>
   ) {
@@ -714,6 +724,7 @@ export class RsRoomDetail extends LitElement {
         eco_temp: this._ecoTemp,
         presence_persons: this._selectedPresencePersons.filter(p => p),
         display_name: this._displayName,
+        heating_system_type: this._heatingSystemType,
       });
 
       this._dirty = false;

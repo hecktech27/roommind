@@ -104,6 +104,7 @@ class RoomMindStore:
                 "eco_temp": config.get("eco_temp", DEFAULT_ECO_TEMP),
                 "presence_persons": config.get("presence_persons", []),
                 "display_name": config.get("display_name", ""),
+                "heating_system_type": config.get("heating_system_type", ""),
             }
             self._data[area_id] = room
             await self._async_save()

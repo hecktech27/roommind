@@ -74,6 +74,10 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self._mold_risk_since: dict[str, float] = {}
         self._mold_prevention_active: dict[str, bool] = {}
         self._mold_throttler = NotificationThrottler()
+        # Residual heat tracking (heating → idle transition)
+        self._heating_off_since: dict[str, float] = {}
+        self._heating_off_power: dict[str, float] = {}
+        self._heating_on_since: dict[str, float] = {}
 
     async def _async_update_data(self) -> dict:
         """Fetch and compute state for all rooms.
@@ -370,6 +374,19 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             mold_prevention_delta=mold_prevention_temp_delta,
         )
 
+        # --- Compute residual heat from previous cycle state ---
+        system_type = room.get("heating_system_type", "")
+        q_residual = 0.0
+        if system_type and area_id in self._heating_off_since and self._previous_modes.get(area_id, MODE_IDLE) != MODE_HEATING:
+            from .residual_heat import compute_residual_heat as _compute_qr
+            elapsed = (time.time() - self._heating_off_since[area_id]) / 60.0
+            heat_dur = (
+                self._heating_off_since[area_id]
+                - self._heating_on_since.get(area_id, self._heating_off_since[area_id])
+            ) / 60.0
+            last_pf = self._heating_off_power.get(area_id, 1.0)
+            q_residual = _compute_qr(elapsed, system_type, last_pf, heat_dur)
+
         # Determine and apply mode with MPC controller
         controller = MPCController(
             self.hass,
@@ -385,6 +402,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             latitude=self.hass.config.latitude,
             longitude=self.hass.config.longitude,
             cloud_series=self._extract_cloud_series(outdoor_forecast),
+            q_residual=q_residual,
+            heating_system_type=system_type,
         )
         mode, power_fraction = await controller.async_evaluate(current_temp, target_temp)
 
@@ -403,6 +422,10 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         # Pause climate control when any window/door is open (with configurable delays)
         raw_open = self._is_window_open(room)
         open_delay = room.get("window_open_delay", 0)
+        # For underfloor heating, enforce a minimum window-open delay to prevent
+        # premature shutoff (the slab radiates regardless, and restarting is slow).
+        if system_type == "underfloor" and open_delay < 300:
+            open_delay = 300
         close_delay = room.get("window_close_delay", 0)
         now = time.time()
         was_paused = self._window_paused.get(area_id, False)
@@ -427,6 +450,25 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         if window_open:
             mode = MODE_IDLE
             power_fraction = 0.0
+
+        # --- Residual heat transition tracking ---
+        # Update heating start/stop timestamps based on current mode.
+        # q_residual was already computed above from previous cycle state.
+        if system_type:
+            if mode == MODE_HEATING:
+                # Actively heating: track start time, clear residual
+                self._heating_off_since.pop(area_id, None)
+                self._heating_off_power[area_id] = power_fraction
+                if self._previous_modes.get(area_id, MODE_IDLE) != MODE_HEATING:
+                    self._heating_on_since[area_id] = time.time()
+            elif self._previous_modes.get(area_id, MODE_IDLE) == MODE_HEATING:
+                # Transition from heating: start residual tracking
+                self._heating_off_since[area_id] = time.time()
+            elif q_residual == 0.0 and area_id in self._heating_off_since:
+                # Residual has fully decayed, clean up
+                self._heating_off_since.pop(area_id, None)
+                self._heating_off_power.pop(area_id, None)
+                self._heating_on_since.pop(area_id, None)
 
         # Exclude TRVs currently being valve-protection-cycled from normal control
         cycling_eids = {eid for eid in room.get("thermostats", []) if eid in self._valve_cycling}
@@ -483,14 +525,14 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             T_outdoor = self.outdoor_temp if self.outdoor_temp is not None else current_temp
             if window_open:
                 # Window open: flush pending EKF update, then learn k_window
-                self._flush_ekf_accumulator(area_id, current_temp, T_outdoor, room)
+                self._flush_ekf_accumulator(area_id, current_temp, T_outdoor, room, q_residual=q_residual)
                 self._model_manager.update_window_open(
                     area_id, current_temp, T_outdoor, dt_minutes,
                 )
             elif ekf_mode is None:
                 # Unobservable device state (control disabled, no hvac_action)
                 # — flush pending data and skip training to prevent corruption.
-                self._flush_ekf_accumulator(area_id, current_temp, T_outdoor, room)
+                self._flush_ekf_accumulator(area_id, current_temp, T_outdoor, room, q_residual=q_residual)
                 self._ekf_accumulated_dt.pop(area_id, None)
                 self._ekf_accumulated_mode.pop(area_id, None)
                 self._ekf_accumulated_pf.pop(area_id, None)
@@ -499,7 +541,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 prev_mode = self._ekf_accumulated_mode.get(area_id)
                 if prev_mode is not None and prev_mode != ekf_mode:
                     # Mode changed — flush with the previous mode
-                    self._flush_ekf_accumulator(area_id, current_temp, T_outdoor, room)
+                    self._flush_ekf_accumulator(area_id, current_temp, T_outdoor, room, q_residual=q_residual)
 
                 old_dt = self._ekf_accumulated_dt.get(area_id, 0.0)
                 new_dt = old_dt + dt_minutes
@@ -518,6 +560,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                         can_heat=can_heat, can_cool=can_cool,
                         power_fraction=pf,
                         q_solar=self._current_q_solar,
+                        q_residual=q_residual,
                     )
                     self._ekf_accumulated_dt[area_id] = 0.0
             self._last_temps[area_id] = current_temp
@@ -578,6 +621,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
     def _flush_ekf_accumulator(
         self, area_id: str, current_temp: float, T_outdoor: float, room: dict,
+        q_residual: float = 0.0,
     ) -> None:
         """Flush accumulated EKF update (on mode change or window open)."""
         accumulated = self._ekf_accumulated_dt.pop(area_id, 0.0)
@@ -589,6 +633,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 area_id, current_temp, T_outdoor, prev_mode, accumulated,
                 can_heat=can_heat, can_cool=can_cool, power_fraction=pf,
                 q_solar=self._current_q_solar,
+                q_residual=q_residual,
             )
 
     async def _async_valve_protection_finish(self) -> None:
@@ -868,6 +913,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self._previous_modes.pop(area_id, None)
         self._last_temps.pop(area_id, None)
         self._pending_predictions.pop(area_id, None)
+        self._heating_off_since.pop(area_id, None)
+        self._heating_off_power.pop(area_id, None)
+        self._heating_on_since.pop(area_id, None)
         self._model_manager.remove_room(area_id)
         if self._history_store:
             await self.hass.async_add_executor_job(self._history_store.remove_room, area_id)

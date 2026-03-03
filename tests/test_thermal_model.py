@@ -962,3 +962,108 @@ def test_rc_model_predict_trajectory_with_solar():
     # With solar, temps should be higher (skip index 0 which is the starting temp)
     for t_ns, t_s in zip(T_no_solar[1:], T_solar[1:]):
         assert t_s >= t_ns, "Solar should keep temps higher"
+
+
+# ---------------------------------------------------------------------------
+# Residual heat (q_residual) tests
+# ---------------------------------------------------------------------------
+
+
+def test_ekf_update_q_residual_zero_is_noop():
+    """q_residual=0 should be identical to no-arg (backwards compat)."""
+    ekf_a = ThermalEKF()
+    ekf_b = ThermalEKF()
+    ekf_a.update(T_measured=20.0, T_outdoor=10.0, mode="idle", dt_minutes=5.0)
+    ekf_b.update(T_measured=20.0, T_outdoor=10.0, mode="idle", dt_minutes=5.0, q_residual=0.0)
+    assert ekf_a._x == pytest.approx(ekf_b._x, abs=1e-9)
+
+
+def test_ekf_q_residual_ignored_during_heating():
+    """q_residual during heating should have no extra effect (no double-counting)."""
+    ekf_a = ThermalEKF()
+    ekf_b = ThermalEKF()
+    for _ in range(5):
+        ekf_a.update(T_measured=20.0, T_outdoor=10.0, mode="heating", dt_minutes=5.0)
+        ekf_b.update(T_measured=20.0, T_outdoor=10.0, mode="heating", dt_minutes=5.0, q_residual=0.5)
+    # State should be identical since q_residual only affects idle mode
+    assert ekf_a._x == pytest.approx(ekf_b._x, abs=1e-9)
+
+
+def test_ekf_q_residual_idle_warms_prediction():
+    """With q_residual > 0 during idle, prediction should be warmer."""
+    ekf = ThermalEKF()
+    # Train a bit first
+    for _ in range(10):
+        ekf.update(T_measured=20.0, T_outdoor=10.0, mode="idle", dt_minutes=5.0)
+
+    model = ekf.get_model()
+    T_no_res = model.predict(20.0, 10.0, 0.0, 5.0, q_residual=0.0)
+    T_with_res = model.predict(20.0, 10.0, 0.0, 5.0, q_residual=0.5)
+    assert T_with_res > T_no_res, "Residual heat should keep temps higher during idle"
+
+
+def test_rc_model_predict_residual_only_when_idle():
+    """q_residual should be ignored when Q_active != 0 (no double-counting)."""
+    model = RCModel(C=2.0, U=50.0, Q_heat=1000.0, Q_cool=1500.0)
+    T_heat = model.predict(20.0, 10.0, 1000.0, 5.0, q_residual=0.0)
+    T_heat_res = model.predict(20.0, 10.0, 1000.0, 5.0, q_residual=0.5)
+    assert T_heat == pytest.approx(T_heat_res), "Residual should be ignored during active heating"
+
+
+def test_rc_model_predict_residual_during_idle():
+    """q_residual > 0 during idle should produce warmer temp."""
+    model = RCModel(C=2.0, U=50.0, Q_heat=1000.0, Q_cool=1500.0)
+    T_idle = model.predict(20.0, 10.0, 0.0, 5.0, q_residual=0.0)
+    T_idle_res = model.predict(20.0, 10.0, 0.0, 5.0, q_residual=0.5)
+    assert T_idle_res > T_idle
+
+
+def test_rc_model_trajectory_with_residual():
+    """predict_trajectory uses per-block residual series."""
+    model = RCModel(C=2.0, U=50.0, Q_heat=1000.0, Q_cool=1500.0)
+    T_no_res = model.predict_trajectory(
+        T_room=20.0, T_outdoor_series=[5.0, 5.0, 5.0],
+        Q_active_series=[0.0, 0.0, 0.0], dt_minutes=5.0,
+    )
+    T_res = model.predict_trajectory(
+        T_room=20.0, T_outdoor_series=[5.0, 5.0, 5.0],
+        Q_active_series=[0.0, 0.0, 0.0], dt_minutes=5.0,
+        q_residual_series=[0.5, 0.3, 0.1],
+    )
+    for t_nr, t_r in zip(T_no_res[1:], T_res[1:]):
+        assert t_r >= t_nr, "Residual heat should keep trajectory temps higher"
+
+
+def test_regression_residual_no_beta_s_inflation():
+    """KEY TEST: Heating cycles + idle with residual must not inflate beta_s.
+
+    When residual heat is properly accounted for, the EKF should not
+    misattribute the continued warming to solar gain.
+    """
+    ekf = ThermalEKF()
+    true_model = RCModel(C=1.0, U=2.0, Q_heat=50.0, Q_cool=75.0)
+    T = 20.0
+    T_out = 10.0
+
+    # Initialize
+    ekf.update(T_measured=T, T_outdoor=T_out, mode="idle", dt_minutes=5.0)
+
+    # Run 20 heating cycles followed by idle with residual decay
+    for cycle in range(20):
+        # Heat for 5 blocks
+        for _ in range(5):
+            T = true_model.predict(T, T_out, 50.0, 5.0)
+            ekf.update(T_measured=T, T_outdoor=T_out, mode="heating", dt_minutes=5.0)
+
+        # Idle for 30 blocks with residual heat and NO solar
+        for j in range(30):
+            q_res = 0.85 * math.exp(-j * 5.0 / 90.0)  # underfloor-like decay
+            T = true_model.predict(T, T_out, 50.0 * q_res, 5.0)
+            ekf.update(
+                T_measured=T, T_outdoor=T_out, mode="idle", dt_minutes=5.0,
+                q_solar=0.0, q_residual=q_res,
+            )
+
+    # beta_s should NOT have inflated since q_solar was always 0
+    beta_s = ekf._x[4]
+    assert beta_s < 5.0, f"beta_s inflated to {beta_s} — residual misattributed to solar"

@@ -2881,3 +2881,179 @@ class TestComputeTrvSetpoint:
         # trv = 20 + 0.01 * (30 - 20) = 20.1 → clamped to target 21.0
         result = coordinator._compute_trv_setpoint("heating", 0.01, 20.0, 21.0, True)
         assert result == 21.0
+
+
+# ---------------------------------------------------------------------------
+# Residual heat tracking tests
+# ---------------------------------------------------------------------------
+
+
+class TestResidualHeatTracking:
+    """Tests for residual heat transition tracking in the coordinator."""
+
+    @pytest.mark.asyncio
+    async def test_no_tracking_without_system_type(self, hass, mock_config_entry):
+        """Without heating_system_type, no residual tracking should occur."""
+        room = {**SAMPLE_ROOM}
+        # Default: no heating_system_type
+        store = _make_store_mock(rooms={room["area_id"]: room})
+        store.get_settings.return_value = {"climate_control_active": True}
+        hass.data = {"roommind": {"store": store}}
+        hass.states.get = make_mock_states_get(
+            temp="18.0", schedule_state="on",
+            schedule_attrs={"current_event": True, "friendly_name": "Living Room Heating"},
+        )
+        hass.services.async_call = AsyncMock()
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+
+        assert room["area_id"] not in coordinator._heating_off_since
+        assert room["area_id"] not in coordinator._heating_on_since
+
+    @pytest.mark.asyncio
+    async def test_tracking_with_system_type(self, hass, mock_config_entry):
+        """With heating_system_type, transition tracking should populate dicts."""
+        room = {**SAMPLE_ROOM, "heating_system_type": "underfloor"}
+        store = _make_store_mock(rooms={room["area_id"]: room})
+        store.get_settings.return_value = {"climate_control_active": True}
+        hass.data = {"roommind": {"store": store}}
+        hass.states.get = make_mock_states_get(
+            temp="18.0", schedule_state="on",
+            schedule_attrs={"current_event": True, "friendly_name": "Living Room Heating"},
+        )
+        hass.services.async_call = AsyncMock()
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+
+        # After first cycle: room should be heating, so _heating_on_since tracked
+        assert room["area_id"] in coordinator._heating_on_since
+
+    @pytest.mark.asyncio
+    async def test_heating_to_idle_transition_populates_off_since(self, hass, mock_config_entry):
+        """When mode transitions from heating to idle, _heating_off_since should be set."""
+        room = {**SAMPLE_ROOM, "heating_system_type": "underfloor"}
+        store = _make_store_mock(rooms={room["area_id"]: room})
+        store.get_settings.return_value = {"climate_control_active": True}
+        hass.data = {"roommind": {"store": store}}
+        hass.services.async_call = AsyncMock()
+        aid = room["area_id"]
+
+        # Cycle 1: heating (temp below target, schedule on)
+        hass.states.get = make_mock_states_get(
+            temp="18.0", schedule_state="on",
+            schedule_attrs={"current_event": True, "friendly_name": "Heat"},
+        )
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+        assert aid in coordinator._heating_on_since
+        assert coordinator._previous_modes.get(aid) == "heating"
+
+        # Cycle 2: idle (schedule off -> eco 17, temp 18 above eco -> idle)
+        hass.states.get = make_mock_states_get(
+            temp="18.0", schedule_state="off",
+            schedule_attrs={"current_event": False, "friendly_name": "Heat"},
+        )
+        await coordinator._async_update_data()
+
+        # Transition to idle should populate _heating_off_since
+        assert aid in coordinator._heating_off_since
+        # Heating start should still be tracked (needed for charge fraction)
+        assert aid in coordinator._heating_on_since
+
+    @pytest.mark.asyncio
+    async def test_reheat_clears_residual_tracking(self, hass, mock_config_entry):
+        """When heating restarts, _heating_off_since should be cleared."""
+        room = {**SAMPLE_ROOM, "heating_system_type": "radiator"}
+        store = _make_store_mock(rooms={room["area_id"]: room})
+        store.get_settings.return_value = {"climate_control_active": True}
+        hass.data = {"roommind": {"store": store}}
+        hass.services.async_call = AsyncMock()
+        aid = room["area_id"]
+
+        # Cycle 1: heating
+        hass.states.get = make_mock_states_get(
+            temp="18.0", schedule_state="on",
+            schedule_attrs={"current_event": True, "friendly_name": "Heat"},
+        )
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+        assert coordinator._previous_modes.get(aid) == "heating"
+
+        # Cycle 2: idle
+        hass.states.get = make_mock_states_get(
+            temp="18.0", schedule_state="off",
+            schedule_attrs={"current_event": False, "friendly_name": "Heat"},
+        )
+        await coordinator._async_update_data()
+        assert aid in coordinator._heating_off_since
+
+        # Cycle 3: heating again
+        hass.states.get = make_mock_states_get(
+            temp="16.0", schedule_state="on",
+            schedule_attrs={"current_event": True, "friendly_name": "Heat"},
+        )
+        await coordinator._async_update_data()
+        # Reheating should clear off_since and reset on_since
+        assert aid not in coordinator._heating_off_since
+        assert aid in coordinator._heating_on_since
+
+    @pytest.mark.asyncio
+    async def test_room_removal_cleans_residual_dicts(self, hass, mock_config_entry):
+        """Removing a room should clean up residual heat tracking dicts."""
+        room = {**SAMPLE_ROOM, "heating_system_type": "underfloor"}
+        store = _make_store_mock(rooms={room["area_id"]: room})
+        store.get_settings.return_value = {"climate_control_active": True}
+        hass.data = {"roommind": {"store": store}}
+        hass.services.async_call = AsyncMock()
+        aid = room["area_id"]
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        # Manually populate tracking dicts (simulates active heating)
+        coordinator._heating_on_since[aid] = time.time() - 600
+        coordinator._heating_off_since[aid] = time.time() - 60
+        coordinator._heating_off_power[aid] = 0.8
+
+        # Now remove the room
+        with patch("homeassistant.helpers.entity_registry.async_get") as mock_get, \
+             patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock):
+            mock_registry = MagicMock()
+            mock_registry.entities = MagicMock()
+            mock_registry.entities.values.return_value = []
+            mock_get.return_value = mock_registry
+            await coordinator.async_room_removed(aid)
+
+        assert aid not in coordinator._heating_off_since
+        assert aid not in coordinator._heating_off_power
+        assert aid not in coordinator._heating_on_since
+
+    @pytest.mark.asyncio
+    async def test_underfloor_window_delay_minimum(self, hass, mock_config_entry):
+        """Underfloor rooms should have at least 300s window open delay.
+
+        With window_open_delay=0, a standard room would immediately pause.
+        An underfloor room overrides this to 300s, so the first cycle should
+        NOT pause because 0 seconds < 300s.
+        """
+        room = {
+            **SAMPLE_ROOM,
+            "heating_system_type": "underfloor",
+            "window_sensors": ["binary_sensor.window"],
+            "window_open_delay": 0,
+        }
+        store = _make_store_mock(rooms={room["area_id"]: room})
+        store.get_settings.return_value = {"climate_control_active": True}
+        hass.data = {"roommind": {"store": store}}
+        hass.states.get = make_mock_states_get(
+            temp="20.0", schedule_state="on",
+            schedule_attrs={"current_event": True, "friendly_name": "Living Room Heating"},
+            window_sensors={"binary_sensor.window": "on"},
+        )
+        hass.services.async_call = AsyncMock()
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+
+        # With window just opened and underfloor, heating should NOT immediately pause
+        # because of the 300s minimum delay (window_open_since was just set, elapsed=0 < 300s)
+        assert not coordinator._window_paused.get(room["area_id"], False)
+        # But the open timestamp should be tracked
+        assert room["area_id"] in coordinator._window_open_since

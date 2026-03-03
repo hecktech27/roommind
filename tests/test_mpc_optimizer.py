@@ -211,3 +211,73 @@ def test_power_fraction_clamped():
         if a != "idle":
             assert pf >= MIN_POWER_FRACTION
             assert pf <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Residual heat tests
+# ---------------------------------------------------------------------------
+
+
+def test_optimizer_residual_reduces_heating():
+    """With residual heat, optimizer should heat less or stop sooner."""
+    model = RCModel(C=2.0, U=50.0, Q_heat=1000.0, Q_cool=1500.0)
+    opt = MPCOptimizer(model)
+    n = 12
+    # Without residual
+    plan_no_res = opt.optimize(
+        T_room=19.5,
+        T_outdoor_series=[10.0] * n,
+        target_series=[21.0] * n,
+        dt_minutes=5,
+    )
+    # With significant residual heat
+    plan_res = opt.optimize(
+        T_room=19.5,
+        T_outdoor_series=[10.0] * n,
+        target_series=[21.0] * n,
+        dt_minutes=5,
+        residual_series=[0.5, 0.4, 0.3, 0.2, 0.15, 0.1, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )
+    # With residual, temperatures during idle blocks should be higher
+    heating_blocks_no = sum(1 for a in plan_no_res.actions if a == "heating")
+    heating_blocks_res = sum(1 for a in plan_res.actions if a == "heating")
+    # Residual heat should reduce need for active heating
+    assert heating_blocks_res <= heating_blocks_no
+
+
+def test_compute_optimal_power_with_residual():
+    """Residual heat in drift should reduce required heating power."""
+    model = RCModel(C=2.0, U=50.0, Q_heat=1000.0, Q_cool=1500.0)
+    opt = MPCOptimizer(model)
+    pf_no_res, mode_no_res = opt.compute_optimal_power(
+        19.5, 10.0, 21.0, 5.0, q_residual=0.0,
+    )
+    pf_res, mode_res = opt.compute_optimal_power(
+        19.5, 10.0, 21.0, 5.0, q_residual=0.5,
+    )
+    # With residual, either lower power or idle
+    if mode_res == "heating":
+        assert pf_res <= pf_no_res
+    else:
+        assert mode_res == "idle"  # residual is enough
+
+
+def test_optimizer_min_run_blocks_from_profile():
+    """min_run_blocks is respected in the plan."""
+    model = RCModel(C=2.0, U=50.0, Q_heat=1000.0, Q_cool=1500.0)
+    opt = MPCOptimizer(model, min_run_blocks=6)  # underfloor-like
+    plan = opt.optimize(
+        T_room=17.0,
+        T_outdoor_series=[5.0] * 12,
+        target_series=[21.0] * 12,
+        dt_minutes=5,
+    )
+    # If heating starts, it should run for at least 6 blocks
+    if plan.actions[0] == "heating":
+        heating_count = 0
+        for a in plan.actions:
+            if a == "heating":
+                heating_count += 1
+            else:
+                break
+        assert heating_count >= 6

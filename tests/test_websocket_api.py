@@ -1273,3 +1273,89 @@ def test_register_websocket_commands(hass):
         assert mock_reg.call_count == 10
 
 
+# ---------------------------------------------------------------------------
+# Heating system type field tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_save_room_heating_system_type_accepted(ws_hass, store, connection):
+    """heating_system_type is accepted in rooms/save schema."""
+    await store.async_load()
+    msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "kitchen",
+        "thermostats": ["climate.kitchen"],
+        "heating_system_type": "underfloor",
+    }
+    await _save_room(ws_hass, connection, msg)
+    connection.send_result.assert_called_once()
+    room = connection.send_result.call_args[0][1]["room"]
+    assert room["heating_system_type"] == "underfloor"
+
+
+@pytest.mark.asyncio
+async def test_save_room_heating_system_type_empty(ws_hass, store, connection):
+    """Empty string is a valid heating_system_type (default)."""
+    await store.async_load()
+    msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "bedroom",
+        "thermostats": ["climate.bedroom"],
+        "heating_system_type": "",
+    }
+    await _save_room(ws_hass, connection, msg)
+    connection.send_result.assert_called_once()
+    room = connection.send_result.call_args[0][1]["room"]
+    assert room["heating_system_type"] == ""
+
+
+@pytest.mark.asyncio
+async def test_save_room_heating_system_type_radiator(ws_hass, store, connection):
+    """'radiator' is a valid heating_system_type."""
+    await store.async_load()
+    msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "hallway",
+        "thermostats": ["climate.hallway"],
+        "heating_system_type": "radiator",
+    }
+    await _save_room(ws_hass, connection, msg)
+    connection.send_result.assert_called_once()
+    room = connection.send_result.call_args[0][1]["room"]
+    assert room["heating_system_type"] == "radiator"
+
+
+def test_save_room_heating_system_type_invalid_rejected():
+    """Invalid heating_system_type value should be rejected by voluptuous schema."""
+    import voluptuous as vol
+
+    # Test the vol.In validator directly (matches the schema in websocket_api.py)
+    validator = vol.In(["", "radiator", "underfloor"])
+    with pytest.raises(vol.Invalid):
+        validator("geothermal")
+    # Valid values should pass
+    assert validator("") == ""
+    assert validator("radiator") == "radiator"
+    assert validator("underfloor") == "underfloor"
+
+
+@pytest.mark.asyncio
+async def test_save_room_heating_system_type_defaults_empty(ws_hass, store, connection):
+    """When heating_system_type is not provided, it defaults to empty string."""
+    await store.async_load()
+    msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "study",
+        "thermostats": ["climate.study"],
+    }
+    await _save_room(ws_hass, connection, msg)
+    connection.send_result.assert_called_once()
+    room = connection.send_result.call_args[0][1]["room"]
+    assert room.get("heating_system_type", "") == ""
+
+

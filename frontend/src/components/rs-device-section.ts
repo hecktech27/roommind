@@ -20,6 +20,7 @@ export class RsDeviceSection extends LitElement {
   @property({ attribute: false }) public selectedWindowSensors: Set<string> = new Set();
   @property({ type: Number }) public windowOpenDelay = 0;
   @property({ type: Number }) public windowCloseDelay = 0;
+  @property({ type: String }) public heatingSystemType = "";
 
   @property({ type: Boolean }) public editing = false;
 
@@ -255,6 +256,21 @@ export class RsDeviceSection extends LitElement {
           ` : nothing}
         </div>
       ` : nothing}
+
+      ${this.heatingSystemType ? html`
+        <div class="device-group">
+          <div class="section-subtitle">${localize("devices.heating_system_type", this.hass.language)}</div>
+          <div class="view-row">
+            <span class="view-name">${
+              this.heatingSystemType === "radiator"
+                ? localize("devices.system_type_radiator", this.hass.language)
+                : this.heatingSystemType === "underfloor"
+                  ? localize("devices.system_type_underfloor", this.hass.language)
+                  : this.heatingSystemType
+            }</span>
+          </div>
+        </div>
+      ` : nothing}
     `;
   }
 
@@ -445,6 +461,25 @@ export class RsDeviceSection extends LitElement {
           </div>
         ` : nothing}
       </div>
+
+      ${this.selectedThermostats.size > 0 ? html`
+        <div class="device-group">
+          <div class="section-subtitle">${localize("devices.heating_system_type", this.hass.language)}</div>
+          <div style="padding: 0 14px;">
+            <ha-select
+              .value=${this.heatingSystemType || ""}
+              @selected=${this._onHeatingSystemTypeChange}
+              @closed=${(e: Event) => e.stopPropagation()}
+              fixedMenuPosition
+              style="width: 100%;"
+            >
+              <ha-list-item value="">${localize("devices.system_type_none", this.hass.language)}</ha-list-item>
+              <ha-list-item value="radiator">${localize("devices.system_type_radiator", this.hass.language)}</ha-list-item>
+              <ha-list-item value="underfloor">${localize("devices.system_type_underfloor", this.hass.language)}</ha-list-item>
+            </ha-select>
+          </div>
+        </div>
+      ` : nothing}
 
       <div class="entity-picker-wrap">
         <ha-entity-picker
@@ -666,6 +701,17 @@ export class RsDeviceSection extends LitElement {
     const value = Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0);
     this.dispatchEvent(
       new CustomEvent("window-close-delay-changed", {
+        detail: { value },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  private _onHeatingSystemTypeChange(e: Event) {
+    const value = getSelectValue(e) ?? "";
+    this.dispatchEvent(
+      new CustomEvent("heating-system-type-changed", {
         detail: { value },
         bubbles: true,
         composed: true,

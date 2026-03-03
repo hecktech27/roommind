@@ -125,6 +125,10 @@
   "devices.other_area": "Other area",
   "devices.type_thermostat": "Thermostat",
   "devices.type_ac": "AC",
+  "devices.heating_system_type": "Heating System Type",
+  "devices.system_type_none": "Standard (no residual heat)",
+  "devices.system_type_radiator": "Radiator",
+  "devices.system_type_underfloor": "Underfloor Heating",
 
   "hero.window_open": "Window open – paused",
   "card.window_open": "Window open",

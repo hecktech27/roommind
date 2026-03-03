@@ -59,6 +59,7 @@ export interface RoomConfig {
   override_type?: OverrideType | null;
   presence_persons?: string[];
   display_name?: string;
+  heating_system_type?: string;
   live?: RoomLiveData;
 }
 

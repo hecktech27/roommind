@@ -67,6 +67,7 @@ class RCModel:
         dt_minutes: float,
         *,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> float:
         """Predict room temperature after *dt_minutes* using the analytical solution.
 
@@ -76,6 +77,7 @@ class RCModel:
             Q_active: active power [W] (positive = heating, negative = cooling).
             dt_minutes: time step in minutes.
             q_solar: normalized solar irradiance (GHI/1000, 0–1).
+            q_residual: residual heat fraction from thermal mass (0–1).
 
         Returns:
             Predicted room temperature [degC], clamped to [0, 50].
@@ -83,8 +85,10 @@ class RCModel:
         if dt_minutes <= 0:
             return T_room
         dt_hours = dt_minutes / 60.0
-        # Total thermal input including solar gain
-        Q_total = Q_active + self.Q_solar * q_solar
+        # Residual heat: only contributes when HVAC is off (no double-counting)
+        Q_residual = self.Q_heat * q_residual if Q_active == 0.0 and q_residual > 0 else 0.0
+        # Total thermal input including solar gain and residual heat
+        Q_total = Q_active + self.Q_solar * q_solar + Q_residual
         # Equilibrium temperature: T_out + Q/U
         T_eq = T_outdoor + Q_total / self.U
         # Physical clamp: no room equilibrates outside [0, 50] degC
@@ -126,6 +130,7 @@ class RCModel:
         dt_minutes: float,
         *,
         q_solar_series: list[float] | None = None,
+        q_residual_series: list[float] | None = None,
     ) -> list[float]:
         """Predict a temperature trajectory over multiple time steps.
 
@@ -138,6 +143,7 @@ class RCModel:
             Q_active_series: active power per step [W].
             dt_minutes: duration of each step in minutes.
             q_solar_series: normalized solar irradiance per step (GHI/1000).
+            q_residual_series: residual heat fraction per step (0–1).
 
         Returns:
             List of len(series) + 1 temperatures (including the initial value).
@@ -147,11 +153,13 @@ class RCModel:
                 "T_outdoor_series and Q_active_series must have the same length"
             )
         solar = q_solar_series or [0.0] * len(T_outdoor_series)
+        residual = q_residual_series or [0.0] * len(T_outdoor_series)
         trajectory = [T_room]
         T = T_room
         for i, (T_out, Q) in enumerate(zip(T_outdoor_series, Q_active_series)):
             qs = solar[i] if i < len(solar) else 0.0
-            T = self.predict(T, T_out, Q, dt_minutes, q_solar=qs)
+            qr = residual[i] if i < len(residual) else 0.0
+            T = self.predict(T, T_out, Q, dt_minutes, q_solar=qs, q_residual=qr)
             trajectory.append(T)
         return trajectory
 
@@ -364,6 +372,7 @@ class ThermalEKF:
         dt_minutes: float,
         *,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> float:
         """Prediction uncertainty in degC for a given operating point.
 
@@ -382,7 +391,7 @@ class ThermalEKF:
         dt_h = dt_minutes / 60.0
         alpha = self._x[1]
         u = self._mode_to_u(mode)
-        F = self._compute_jacobian(T_room, alpha, u, T_outdoor, dt_h, mode, q_solar=q_solar)
+        F = self._compute_jacobian(T_room, alpha, u, T_outdoor, dt_h, mode, q_solar=q_solar, q_residual=q_residual)
 
         # P_pred = F @ P @ F^T + Q_noise (only need element [0][0])
         # Compute F[0,:] @ P
@@ -473,6 +482,7 @@ class ThermalEKF:
         *,
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> None:
         """Run one full EKF cycle: predict then update with measurement.
 
@@ -483,6 +493,7 @@ class ThermalEKF:
             dt_minutes: time since last call [min].
             power_fraction: fraction of max heating/cooling power applied (0-1).
             q_solar: normalized solar irradiance (GHI/1000, 0–1).
+            q_residual: residual heat fraction from thermal mass (0–1).
         """
         if dt_minutes <= 0:
             return
@@ -499,7 +510,7 @@ class ThermalEKF:
         dt_h = dt_minutes / 60.0
 
         # --- Predict step ---
-        self._predict_step(T_outdoor, predict_mode, dt_h, power_fraction=power_fraction, q_solar=q_solar)
+        self._predict_step(T_outdoor, predict_mode, dt_h, power_fraction=power_fraction, q_solar=q_solar, q_residual=q_residual)
 
         # --- Update step ---
         self._update_step(T_measured)
@@ -570,12 +581,13 @@ class ThermalEKF:
         *,
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> list[list[float]]:
         """Compute the 5x5 Jacobian of the state transition.
 
         F[0][0] = dT_new/dT
         F[0][1] = dT_new/d_alpha
-        F[0][2] = dT_new/d_beta_h  (nonzero only during heating)
+        F[0][2] = dT_new/d_beta_h  (nonzero during heating, or idle with residual)
         F[0][3] = dT_new/d_beta_c  (nonzero only during cooling)
         F[0][4] = dT_new/d_beta_s  (nonzero only when q_solar > 0)
         F[1..4][1..4] = I           (parameters are random walk)
@@ -596,6 +608,8 @@ class ThermalEKF:
                 F[0][2] = power_fraction * dt_h
             elif mode == "cooling":
                 F[0][3] = -power_fraction * dt_h
+            elif mode == "idle" and q_residual > 0:
+                F[0][2] = q_residual * dt_h
             # Solar: dT_new/d_beta_s = q_solar * dt_h
             F[0][4] = q_solar * dt_h
         else:
@@ -611,24 +625,28 @@ class ThermalEKF:
                 F[0][2] = power_fraction * (1.0 / alpha) * one_minus_decay
             elif mode == "cooling":
                 F[0][3] = -power_fraction * (1.0 / alpha) * one_minus_decay
+            elif mode == "idle" and q_residual > 0:
+                F[0][2] = q_residual * (1.0 / alpha) * one_minus_decay
             # Solar: dT_new/d_beta_s = q_solar * (1/alpha) * (1 - exp(-alpha*dt))
             F[0][4] = q_solar * (1.0 / alpha) * one_minus_decay
         return F
 
     def _predict_step(
-        self, T_outdoor: float, mode: str, dt_h: float, *, power_fraction: float = 1.0, q_solar: float = 0.0
+        self, T_outdoor: float, mode: str, dt_h: float, *, power_fraction: float = 1.0, q_solar: float = 0.0, q_residual: float = 0.0
     ) -> None:
         """EKF predict: propagate state and covariance forward."""
         T, alpha, beta_h, beta_c, beta_s = self._x
         u_hvac = self._mode_to_u(mode) * power_fraction
-        u = u_hvac + beta_s * q_solar
+        # Residual heat: during idle, thermal mass continues releasing stored energy
+        u_residual = beta_h * q_residual if mode == "idle" and q_residual > 0 else 0.0
+        u = u_hvac + beta_s * q_solar + u_residual
 
         # State prediction (analytical or linearized)
         T_new = self._state_transition(T, alpha, u, T_outdoor, dt_h)
         self._x = [T_new, alpha, beta_h, beta_c, beta_s]
 
         # Jacobian at current state
-        F = self._compute_jacobian(T, alpha, u, T_outdoor, dt_h, mode, power_fraction=power_fraction, q_solar=q_solar)
+        F = self._compute_jacobian(T, alpha, u, T_outdoor, dt_h, mode, power_fraction=power_fraction, q_solar=q_solar, q_residual=q_residual)
 
         # Covariance prediction: P = F @ P @ F^T + Q_noise
         N = self._N
@@ -807,11 +825,12 @@ class RoomModelManager:
         can_cool: bool = True,
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> None:
         """Feed an observed transition to the room's estimator."""
         est = self.get_estimator(area_id)
         est.set_applicable_modes(can_heat, can_cool)
-        est.update(T_new, T_outdoor, mode, dt_minutes, power_fraction=power_fraction, q_solar=q_solar)
+        est.update(T_new, T_outdoor, mode, dt_minutes, power_fraction=power_fraction, q_solar=q_solar, q_residual=q_residual)
 
     def predict(
         self,
@@ -845,12 +864,13 @@ class RoomModelManager:
         dt_minutes: float,
         *,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> float:
         """Return prediction uncertainty in degC for *area_id* at given conditions."""
         if area_id not in self._estimators:
             return float("inf")
         return self._estimators[area_id].prediction_std(
-            Q_active, T_room, T_outdoor, dt_minutes, q_solar=q_solar
+            Q_active, T_room, T_outdoor, dt_minutes, q_solar=q_solar, q_residual=q_residual
         )
 
     def get_mode_counts(self, area_id: str) -> tuple[int, int, int]:

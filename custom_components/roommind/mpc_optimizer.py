@@ -58,6 +58,7 @@ class MPCOptimizer:
         dt_minutes: float = 5.0,
         *,
         solar_series: list[float] | None = None,
+        residual_series: list[float] | None = None,
     ) -> MPCPlan:
         """Find optimal action sequence over the planning horizon.
 
@@ -69,6 +70,7 @@ class MPCOptimizer:
             return MPCPlan(actions=[], temperatures=[T_room], dt_minutes=dt_minutes)
 
         q_solar = solar_series or [0.0] * n_blocks
+        q_residual = residual_series or [0.0] * n_blocks
 
         actions: list[str] = []
         temperatures: list[float] = [T_room]
@@ -81,6 +83,7 @@ class MPCOptimizer:
             T_out = T_outdoor_series[i]
             target = target_series[i]
             qs = q_solar[i] if i < len(q_solar) else 0.0
+            qr = q_residual[i] if i < len(q_residual) else 0.0
 
             # Determine available actions this block
             available = [MODE_IDLE]
@@ -100,18 +103,22 @@ class MPCOptimizer:
                 best_action = MODE_IDLE
                 best_cost = float("inf")
                 future_solar = q_solar[i:] if q_solar else None
+                future_residual = q_residual[i:] if q_residual else None
                 for action in available:
                     cost = self._evaluate_action(
                         action, current_temp, T_out, target,
                         T_outdoor_series[i:], target_series[i:], dt_minutes,
                         future_solar=future_solar,
+                        future_residual=future_residual,
                     )
                     if cost < best_cost:
                         best_cost = cost
                         best_action = action
 
             # Compute proportional power fraction for this block
-            pf, _ = self.compute_optimal_power(current_temp, T_out, target, dt_minutes, q_solar=qs)
+            pf, _ = self.compute_optimal_power(
+                current_temp, T_out, target, dt_minutes, q_solar=qs, q_residual=qr,
+            )
             if best_action == MODE_IDLE:
                 pf = 0.0
             elif best_action != MODE_IDLE and pf == 0.0:
@@ -124,7 +131,10 @@ class MPCOptimizer:
                 Q = -(pf * self.model.Q_cool)
             else:
                 Q = 0.0
-            next_temp = self.model.predict(current_temp, T_out, Q, dt_minutes, q_solar=qs)
+            next_temp = self.model.predict(
+                current_temp, T_out, Q, dt_minutes, q_solar=qs,
+                q_residual=qr if Q == 0.0 else 0.0,
+            )
             next_temp = max(self.temp_min, min(next_temp, self.temp_max))
 
             actions.append(best_action)
@@ -158,6 +168,7 @@ class MPCOptimizer:
         dt_minutes: float,
         *,
         future_solar: list[float] | None = None,
+        future_residual: list[float] | None = None,
     ) -> float:
         """Evaluate the cost of taking an action, looking a few steps ahead."""
         lookahead = min(6, len(future_T_outdoor))  # 30 min lookahead for local decision
@@ -165,16 +176,20 @@ class MPCOptimizer:
         total_cost = 0.0
         T = T_room
         solar = future_solar or []
+        residual = future_residual or []
 
         for j in range(lookahead):
             qs = solar[j] if j < len(solar) else 0.0
+            qr = residual[j] if j < len(residual) else 0.0
             # Simulate HVAC for min_run_blocks (not just 1 block) to correctly
             # value sustained heating/cooling over the lookahead horizon.
+            block_Q = Q if j < self.min_run_blocks else 0.0
             T = self.model.predict(
                 T, future_T_outdoor[j],
-                Q if j < self.min_run_blocks else 0.0,
+                block_Q,
                 dt_minutes,
                 q_solar=qs,
+                q_residual=qr if block_Q == 0.0 else 0.0,
             )
             # Clamp temperature in lookahead to prevent cost explosion
             # from implausible model predictions
@@ -210,6 +225,7 @@ class MPCOptimizer:
         dt_minutes: float,
         *,
         q_solar: float = 0.0,
+        q_residual: float = 0.0,
     ) -> tuple[float, str]:
         """Analytical closed-form optimal heating/cooling power.
 
@@ -235,6 +251,12 @@ class MPCOptimizer:
             T_drift += beta * self.model.Q_solar * q_solar / alpha
         else:
             T_drift += self.model.Q_solar * q_solar * dt_h
+        # Add residual heat from thermal mass to drift
+        if q_residual > 0:
+            if alpha > 0.01:
+                T_drift += beta * self.model.Q_heat * q_residual / alpha
+            else:
+                T_drift += self.model.Q_heat * q_residual * dt_h
 
         Q_required = (target - T_drift) * alpha / beta
 

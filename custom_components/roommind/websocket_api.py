@@ -38,6 +38,7 @@ _ROOM_SAVE_FIELDS = (
     "climate_mode", "schedules", "schedule_selector_entity",
     "window_sensors", "window_open_delay", "window_close_delay",
     "comfort_temp", "eco_temp", "presence_persons", "display_name",
+    "heating_system_type",
 )
 
 _SETTINGS_SAVE_FIELDS = (
@@ -189,6 +190,9 @@ async def websocket_list_rooms(
         vol.Optional("eco_temp"): vol.Coerce(float),
         vol.Optional("presence_persons"): [str],
         vol.Optional("display_name"): str,
+        vol.Optional("heating_system_type"): vol.In(
+            ["", "radiator", "underfloor"]
+        ),
     }
 )
 @websocket_api.async_response
@@ -628,6 +632,20 @@ async def websocket_get_analytics(
                     hass.config.latitude, hass.config.longitude,
                     coordinator._outdoor_forecast, len(target_forecast),
                 )
+                # Residual heat state for analytics simulation
+                system_type = room_config.get("heating_system_type", "")
+                sim_q_residual = 0.0
+                sim_heat_dur = 0.0
+                sim_last_pf = 1.0
+                if system_type and area_id in getattr(coordinator, "_heating_off_since", {}):
+                    import time as _time
+                    off_since = coordinator._heating_off_since[area_id]
+                    elapsed = (_time.time() - off_since) / 60.0
+                    sim_heat_dur = (off_since - coordinator._heating_on_since.get(area_id, off_since)) / 60.0
+                    sim_last_pf = coordinator._heating_off_power.get(area_id, 1.0)
+                    from .residual_heat import compute_residual_heat
+                    sim_q_residual = compute_residual_heat(elapsed, system_type, sim_last_pf, sim_heat_dur)
+
                 pred_temps = simulate_prediction(
                     model=model,
                     estimator=est,
@@ -641,6 +659,10 @@ async def websocket_get_analytics(
                     all_points=all_points,
                     solar_series=solar_series,
                     acs_can_heat=check_acs_can_heat(hass, room_config),
+                    q_residual=sim_q_residual,
+                    heating_system_type=system_type,
+                    heating_duration_minutes=sim_heat_dur,
+                    last_power_fraction=sim_last_pf,
                 )
 
     # Merge into unified forecast points on shared 5-min grid
@@ -687,10 +709,13 @@ async def websocket_thermal_reset(
     area_id = msg["area_id"]
     coordinator = _get_coordinator(hass)
 
-    # Clear learned model
+    # Clear learned model and residual heat tracking
     if coordinator:
         coordinator._model_manager.remove_room(area_id)
         coordinator._last_temps.pop(area_id, None)
+        coordinator._heating_off_since.pop(area_id, None)
+        coordinator._heating_off_power.pop(area_id, None)
+        coordinator._heating_on_since.pop(area_id, None)
 
     # Clear persisted thermal data
     await store.async_clear_thermal_data_room(area_id)
@@ -725,6 +750,9 @@ async def websocket_thermal_reset_all(
         room_ids = list(coordinator._model_manager._estimators.keys())
         coordinator._model_manager = RoomModelManager()
         coordinator._last_temps.clear()
+        coordinator._heating_off_since.clear()
+        coordinator._heating_off_power.clear()
+        coordinator._heating_on_since.clear()
 
     # Clear persisted thermal data
     await store.async_clear_all_thermal_data()
