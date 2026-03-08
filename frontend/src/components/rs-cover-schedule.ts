@@ -8,13 +8,19 @@ import { RsScheduleBase } from "./shared/rs-schedule-base";
 export class RsCoverSchedule extends RsScheduleBase {
   @property({ attribute: false }) public schedules: CoverScheduleEntry[] = [];
 
-  static styles = [RsScheduleBase.sharedStyles, css`
-    .pos-badge {
-      font-size: 0.8em; padding: 1px 6px; border-radius: 10px;
-      background: var(--primary-color); color: var(--text-primary-color);
-      flex-shrink: 0;
-    }
-  `];
+  static styles = [
+    RsScheduleBase.sharedStyles,
+    css`
+      .pos-badge {
+        font-size: 0.8em;
+        padding: 1px 6px;
+        border-radius: 10px;
+        background: var(--primary-color);
+        color: var(--text-primary-color);
+        flex-shrink: 0;
+      }
+    `,
+  ];
 
   render() {
     return this.editing ? this._renderEdit() : this._renderView();
@@ -35,9 +41,11 @@ export class RsCoverSchedule extends RsScheduleBase {
             <div class="schedule-row ${state}">
               ${hasMultiple ? html`<span class="schedule-number">${index + 1}</span>` : nothing}
               <span class="schedule-status-dot"></span>
-              <span class="schedule-name schedule-link"
+              <span
+                class="schedule-name schedule-link"
                 @click=${() => this._openEntityInfo(entry.entity_id)}
-              >${this._getFriendlyName(entry.entity_id)}</span>
+                >${this._getFriendlyName(entry.entity_id)}</span
+              >
               ${pos !== null ? html`<span class="pos-badge">${pos}%</span>` : nothing}
               <span class="schedule-status">${this._statusText(state, l)}</span>
             </div>
@@ -50,37 +58,42 @@ export class RsCoverSchedule extends RsScheduleBase {
   private _renderEdit() {
     const l = this.hass.language;
     const count = this.schedules.length;
-    const usedIds = new Set(this.schedules.map(s => s.entity_id));
+    const usedIds = new Set(this.schedules.map((s) => s.entity_id));
 
     return html`
       <div class="section-hint">${localize("covers.schedule_section_hint", l)}</div>
 
-      ${count > 0 ? html`
-        <div class="schedule-list">
-          ${this.schedules.map((entry, index) => {
-            const state = this._getScheduleState(index, count);
-            return html`
-              <div class="schedule-row ${state}">
-                ${count >= 2 ? html`<span class="schedule-number">${index + 1}</span>` : nothing}
-                <span class="schedule-status-dot"></span>
-                <span class="schedule-name">${this._getFriendlyName(entry.entity_id)}</span>
-                <span class="schedule-status">${this._statusText(state, l)}</span>
-                ${this._renderScheduleControls(index, count,
-                  (i, dir) => this._moveSchedule(i, dir),
-                  (i) => this._removeSchedule(i))}
-              </div>
-            `;
-          })}
-        </div>
-      ` : nothing}
-
+      ${count > 0
+        ? html`
+            <div class="schedule-list">
+              ${this.schedules.map((entry, index) => {
+                const state = this._getScheduleState(index, count);
+                return html`
+                  <div class="schedule-row ${state}">
+                    ${count >= 2
+                      ? html`<span class="schedule-number">${index + 1}</span>`
+                      : nothing}
+                    <span class="schedule-status-dot"></span>
+                    <span class="schedule-name">${this._getFriendlyName(entry.entity_id)}</span>
+                    <span class="schedule-status">${this._statusText(state, l)}</span>
+                    ${this._renderScheduleControls(
+                      index,
+                      count,
+                      (i, dir) => this._moveSchedule(i, dir),
+                      (i) => this._removeSchedule(i),
+                    )}
+                  </div>
+                `;
+              })}
+            </div>
+          `
+        : nothing}
       ${this._renderAddRow(
         localize("covers.add_schedule", l),
         this._getAvailableEntities(usedIds),
         (eid) => this._addSchedule(eid),
         localize("covers.schedule_create_link", l),
       )}
-
       ${this._renderSelectorSection(
         count,
         localize("covers.schedule_selector", l),
@@ -126,15 +139,23 @@ export class RsCoverSchedule extends RsScheduleBase {
   }
 
   private _emitSchedules(value: CoverScheduleEntry[]) {
-    this.dispatchEvent(new CustomEvent("cover-schedules-changed", {
-      detail: { value }, bubbles: true, composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent("cover-schedules-changed", {
+        detail: { value },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _emitSelectorChanged(value: string) {
-    this.dispatchEvent(new CustomEvent("cover-schedule-selector-changed", {
-      detail: { value }, bubbles: true, composed: true,
-    }));
+    this.dispatchEvent(
+      new CustomEvent("cover-schedule-selector-changed", {
+        detail: { value },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 }
 

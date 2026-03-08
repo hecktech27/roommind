@@ -25,9 +25,7 @@ export class RsSettingsPanel extends LitElement {
             : nothing}
         </div>
         <div class="panel-content">
-          ${this.intro
-            ? html`<p class="section-intro">${this.intro}</p>`
-            : nothing}
+          ${this.intro ? html`<p class="section-intro">${this.intro}</p>` : nothing}
           <slot></slot>
         </div>
       </ha-expansion-panel>
@@ -35,7 +33,9 @@ export class RsSettingsPanel extends LitElement {
   }
 
   static styles = css`
-    :host { display: block; }
+    :host {
+      display: block;
+    }
 
     .panel-header {
       display: flex;
@@ -56,7 +56,8 @@ export class RsSettingsPanel extends LitElement {
 
     .section-intro {
       color: var(--secondary-text-color);
-      font-size: 13px; line-height: 1.5;
+      font-size: 13px;
+      line-height: 1.5;
       margin: 0 0 16px;
       padding: 2px 0 2px 12px;
       border-left: 3px solid var(--divider-color);

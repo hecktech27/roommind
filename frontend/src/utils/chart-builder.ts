@@ -100,7 +100,9 @@ export function buildChartSeries(
   const heatingBandData: Array<[number, number | null]> = [];
   const coolingBandData: Array<[number, number | null]> = [];
   const windowBandData: Array<[number, number | null]> = [];
-  let hasHeating = false, hasCooling = false, hasWindow = false;
+  let hasHeating = false,
+    hasCooling = false,
+    hasWindow = false;
 
   for (const p of points) {
     const ts = p.ts * 1000;
@@ -211,7 +213,10 @@ export function buildChartSeries(
     type: "line",
     name: "",
     color: "rgba(255,255,255,0.3)",
-    data: [[chartAnchor, -999], [chartAnchor, 999]],
+    data: [
+      [chartAnchor, -999],
+      [chartAnchor, 999],
+    ],
     showSymbol: false,
     lineStyle: { width: 1, type: "dashed" },
     yAxisIndex: 0,
@@ -277,7 +282,14 @@ export function buildChartOptions(
       trigger: "axis",
       axisPointer: { snap: false },
       valueFormatter: (v: number) => v.toFixed(1) + "\u00A0" + unit,
-      formatter: (params: Array<{ seriesName: string; color: string; value: [number, number]; seriesId: string }>) => {
+      formatter: (
+        params: Array<{
+          seriesName: string;
+          color: string;
+          value: [number, number];
+          seriesId: string;
+        }>,
+      ) => {
         if (!Array.isArray(params) || params.length === 0) return "";
         const date = new Date(params[0].value[0]);
         const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -320,7 +332,8 @@ export function buildChartOptions(
                 parts.push(localize("analytics.heating_period", l));
               }
               if (hp != null && hp > 0 && closest.room_temp != null) {
-                const trv = Math.round((closest.room_temp + (hp / 100) * (30 - closest.room_temp)) * 10) / 10;
+                const trv =
+                  Math.round((closest.room_temp + (hp / 100) * (30 - closest.room_temp)) * 10) / 10;
                 parts.push(`TRV ${formatTemp(trv, hass)}\u00A0${unit}`);
               }
             } else if (closest.mode === "cooling") {

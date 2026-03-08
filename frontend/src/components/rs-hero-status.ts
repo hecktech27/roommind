@@ -8,8 +8,7 @@ import { formatTemp, tempUnit, toDisplayDelta } from "../utils/temperature";
 
 const PENCIL_PATH =
   "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z";
-const CHECK_PATH =
-  "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z";
+const CHECK_PATH = "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z";
 
 @customElement("rs-hero-status")
 export class RsHeroStatus extends LitElement {
@@ -59,11 +58,7 @@ export class RsHeroStatus extends LitElement {
       }
 
       .hero-accent-idle {
-        background: linear-gradient(
-          90deg,
-          var(--disabled-text-color, #bdbdbd),
-          #e0e0e0
-        );
+        background: linear-gradient(90deg, var(--disabled-text-color, #bdbdbd), #e0e0e0);
       }
 
       .hero-accent-none {
@@ -297,9 +292,17 @@ export class RsHeroStatus extends LitElement {
 
     const update = () => {
       const u = this._getOverrideUntil();
-      if (!u) { this._countdown = ""; this._clearCountdownTimer(); return; }
+      if (!u) {
+        this._countdown = "";
+        this._clearCountdownTimer();
+        return;
+      }
       const remaining = u - Date.now() / 1000;
-      if (remaining <= 0) { this._countdown = ""; this._clearCountdownTimer(); return; }
+      if (remaining <= 0) {
+        this._countdown = "";
+        this._clearCountdownTimer();
+        return;
+      }
       const h = Math.floor(remaining / 3600);
       const m = Math.floor((remaining % 3600) / 60);
       this._countdown = h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -320,8 +323,14 @@ export class RsHeroStatus extends LitElement {
     const ov = this._getEffectiveOverride();
 
     if (ov) {
-      const icon = ov.type === "boost" ? "mdi:fire" : ov.type === "eco" ? "mdi:leaf" : "mdi:thermometer";
-      const label = ov.type === "boost" ? localize("override.comfort", l) : ov.type === "eco" ? localize("override.eco", l) : localize("override.custom", l);
+      const icon =
+        ov.type === "boost" ? "mdi:fire" : ov.type === "eco" ? "mdi:leaf" : "mdi:thermometer";
+      const label =
+        ov.type === "boost"
+          ? localize("override.comfort", l)
+          : ov.type === "eco"
+            ? localize("override.eco", l)
+            : localize("override.custom", l);
       const colorClass = `override-${ov.type}`;
       const displayTemp = ov.temp ?? targetTemp;
 
@@ -332,10 +341,14 @@ export class RsHeroStatus extends LitElement {
             ${label} ${localize("hero.override", l)}
           </div>
           <div class="hero-target-value">
-            ${displayTemp !== null ? html`${formatTemp(displayTemp, this.hass)}${tempUnit(this.hass)}` : "--"}
+            ${displayTemp !== null
+              ? html`${formatTemp(displayTemp, this.hass)}${tempUnit(this.hass)}`
+              : "--"}
           </div>
           ${this._countdown
-            ? html`<div class="hero-target-countdown">${localize("hero.remaining", l, { time: this._countdown })}</div>`
+            ? html`<div class="hero-target-countdown">
+                ${localize("hero.remaining", l, { time: this._countdown })}
+              </div>`
             : nothing}
         </div>
       `;
@@ -343,13 +356,15 @@ export class RsHeroStatus extends LitElement {
 
     if (targetTemp !== null || (live.heat_target != null && live.cool_target != null)) {
       const climateMode = this.config?.climate_mode ?? "auto";
-      const showRange = climateMode === "auto"
-        && live.heat_target != null
-        && live.cool_target != null
-        && live.heat_target !== live.cool_target;
+      const showRange =
+        climateMode === "auto" &&
+        live.heat_target != null &&
+        live.cool_target != null &&
+        live.heat_target !== live.cool_target;
 
       const display = showRange
-        ? html`${formatTemp(live.heat_target!, this.hass)} – ${formatTemp(live.cool_target!, this.hass)}${tempUnit(this.hass)}`
+        ? html`${formatTemp(live.heat_target!, this.hass)} –
+          ${formatTemp(live.cool_target!, this.hass)}${tempUnit(this.hass)}`
         : html`${formatTemp((targetTemp ?? live.heat_target)!, this.hass)}${tempUnit(this.hass)}`;
 
       return html`
@@ -389,7 +404,7 @@ export class RsHeroStatus extends LitElement {
         detail: { value },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
     this._editingName = false;
   }
@@ -400,7 +415,7 @@ export class RsHeroStatus extends LitElement {
         detail: { value: "" },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
     this._editingName = false;
     this._nameInput = "";
@@ -458,11 +473,10 @@ export class RsHeroStatus extends LitElement {
             ? html`
                 <span class="mode-pill ${getModeClass(live.mode)}">
                   <span class="mode-dot"></span>
-                  ${formatMode(live.mode, this.hass?.language ?? "en")}${
-                    live.heating_power > 0 && live.heating_power < 100
-                      ? html` ${live.heating_power}%`
-                      : nothing
-                  }
+                  ${formatMode(live.mode, this.hass?.language ?? "en")}${live.heating_power > 0 &&
+                  live.heating_power < 100
+                    ? html` ${live.heating_power}%`
+                    : nothing}
                 </span>
               `
             : nothing}
@@ -487,34 +501,56 @@ export class RsHeroStatus extends LitElement {
               ${live.current_humidity !== null
                 ? html`<div class="hero-metric">
                     <ha-icon icon="mdi:water-percent"></ha-icon>
-                    ${localize("hero.humidity", this.hass?.language ?? "en", { value: live.current_humidity.toFixed(0) })}
+                    ${localize("hero.humidity", this.hass?.language ?? "en", {
+                      value: live.current_humidity.toFixed(0),
+                    })}
                   </div>`
                 : nothing}
               ${live.trv_setpoint != null
                 ? html`<div class="hero-metric">
                     <ha-icon icon="mdi:radiator"></ha-icon>
-                    ${localize("hero.trv_setpoint", this.hass?.language ?? "en", { value: formatTemp(live.trv_setpoint, this.hass), unit: tempUnit(this.hass) })}
+                    ${localize("hero.trv_setpoint", this.hass?.language ?? "en", {
+                      value: formatTemp(live.trv_setpoint, this.hass),
+                      unit: tempUnit(this.hass),
+                    })}
                   </div>`
                 : nothing}
               ${live.mold_surface_rh != null
-                ? html`<div class="hero-metric ${live.mold_risk_level === "critical" ? "critical" : live.mold_risk_level === "warning" ? "warning" : ""}">
+                ? html`<div
+                    class="hero-metric ${live.mold_risk_level === "critical"
+                      ? "critical"
+                      : live.mold_risk_level === "warning"
+                        ? "warning"
+                        : ""}"
+                  >
                     <ha-icon icon="mdi:water-alert"></ha-icon>
-                    ${localize("room.mold_surface_rh", this.hass?.language ?? "en", { value: String(live.mold_surface_rh.toFixed(0)) })}
+                    ${localize("room.mold_surface_rh", this.hass?.language ?? "en", {
+                      value: String(live.mold_surface_rh.toFixed(0)),
+                    })}
                   </div>`
                 : nothing}
               ${live.mold_prevention_active
                 ? html`<div class="hero-metric info">
                     <ha-icon icon="mdi:shield-check"></ha-icon>
-                    ${localize("card.mold_prevention", this.hass?.language ?? "en", { delta: toDisplayDelta(live.mold_prevention_delta, this.hass).toFixed(0), unit: tempUnit(this.hass) })}
+                    ${localize("card.mold_prevention", this.hass?.language ?? "en", {
+                      delta: toDisplayDelta(live.mold_prevention_delta, this.hass).toFixed(0),
+                      unit: tempUnit(this.hass),
+                    })}
                   </div>`
                 : nothing}
               ${!this.climateControlActive
-                ? html`<div class="uncontrolled-hint">${localize("card.not_controlled", this.hass?.language ?? "en")}</div>`
+                ? html`<div class="uncontrolled-hint">
+                    ${localize("card.not_controlled", this.hass?.language ?? "en")}
+                  </div>`
                 : nothing}
             `
           : this.config
-            ? html`<div class="hero-no-data">${localize("hero.waiting", this.hass?.language ?? "en")}</div>`
-            : html`<div class="hero-no-data">${localize("hero.not_configured", this.hass?.language ?? "en")}</div>`}
+            ? html`<div class="hero-no-data">
+                ${localize("hero.waiting", this.hass?.language ?? "en")}
+              </div>`
+            : html`<div class="hero-no-data">
+                ${localize("hero.not_configured", this.hass?.language ?? "en")}
+              </div>`}
       </ha-card>
     `;
   }

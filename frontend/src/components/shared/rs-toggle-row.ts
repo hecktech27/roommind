@@ -41,9 +41,7 @@ export class RsToggleRow extends LitElement {
       <div class="toggle-row">
         <div class="toggle-text">
           <span class="toggle-label">${this.label}</span>
-          ${this.hint
-            ? html`<span class="toggle-hint">${this.hint}</span>`
-            : nothing}
+          ${this.hint ? html`<span class="toggle-hint">${this.hint}</span>` : nothing}
         </div>
         <ha-switch
           .checked=${this.checked}
@@ -60,7 +58,7 @@ export class RsToggleRow extends LitElement {
         detail: (e.target as HTMLInputElement).checked,
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 }

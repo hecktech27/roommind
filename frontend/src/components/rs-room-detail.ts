@@ -64,7 +64,6 @@ export class RsRoomDetail extends LitElement {
   @state() private _coversNightPosition = 0;
   @state() private _editingCovers = false;
 
-
   private _prevAreaId: string | null = null;
   private _saveDebounce?: ReturnType<typeof setTimeout>;
 
@@ -112,8 +111,12 @@ export class RsRoomDetail extends LitElement {
       overflow-x: auto;
       color: var(--primary-text-color);
     }
-    .yaml-key { color: #0550ae; }
-    .yaml-value { color: #0a3069; }
+    .yaml-key {
+      color: #0550ae;
+    }
+    .yaml-value {
+      color: #0a3069;
+    }
 
     /* Actions */
     .actions {
@@ -172,10 +175,7 @@ export class RsRoomDetail extends LitElement {
       this._initFromConfig();
       this._prevAreaId = currentAreaId;
     } else if (changedProps.has("config") && !this._dirty) {
-      const prevConfig = changedProps.get("config") as
-        | RoomConfig
-        | null
-        | undefined;
+      const prevConfig = changedProps.get("config") as RoomConfig | null | undefined;
       if (prevConfig === null || prevConfig === undefined) {
         this._initFromConfig();
       }
@@ -205,7 +205,10 @@ export class RsRoomDetail extends LitElement {
       this._coversAutoEnabled = this.config.covers_auto_enabled ?? false;
       this._coversDeployThreshold = this.config.covers_deploy_threshold ?? 1.5;
       this._coversMinPosition = this.config.covers_min_position ?? 0;
-      this._coversOutdoorMinTemp = this.config.covers_outdoor_min_temp !== undefined ? this.config.covers_outdoor_min_temp : 10.0;
+      this._coversOutdoorMinTemp =
+        this.config.covers_outdoor_min_temp !== undefined
+          ? this.config.covers_outdoor_min_temp
+          : 10.0;
       this._coversOverrideMinutes = this.config.covers_override_minutes ?? 60;
       this._coverSchedules = this.config.cover_schedules ?? [];
       this._coverScheduleSelectorEntity = this.config.cover_schedule_selector_entity ?? "";
@@ -243,7 +246,10 @@ export class RsRoomDetail extends LitElement {
     this._dirty = false;
 
     // Auto-detect editing mode
-    const hasDevices = this._selectedThermostats.size > 0 || this._selectedAcs.size > 0 || !!this._selectedTempSensor;
+    const hasDevices =
+      this._selectedThermostats.size > 0 ||
+      this._selectedAcs.size > 0 ||
+      !!this._selectedTempSensor;
     this._editingSchedule = this._schedules.length === 0;
     this._editingDevices = !hasDevices;
     this._editingCovers = this._selectedCovers.size === 0;
@@ -256,7 +262,9 @@ export class RsRoomDetail extends LitElement {
     temp: number | null;
     until: number | null;
   } {
-    const overrideEl = this.shadowRoot?.querySelector("rs-override-section") as RsOverrideSection | null;
+    const overrideEl = this.shadowRoot?.querySelector(
+      "rs-override-section",
+    ) as RsOverrideSection | null;
     if (overrideEl) {
       return overrideEl.getEffectiveOverride();
     }
@@ -294,9 +302,12 @@ export class RsRoomDetail extends LitElement {
             hasInfo
           >
             <div slot="info">
-              <b>${localize("mode.auto", this.hass.language)}</b> — ${localize("mode.auto_desc", this.hass.language)}<br>
-              <b>${localize("mode.heat_only", this.hass.language)}</b> — ${localize("mode.heat_only_desc", this.hass.language)}<br>
-              <b>${localize("mode.cool_only", this.hass.language)}</b> — ${localize("mode.cool_only_desc", this.hass.language)}
+              <b>${localize("mode.auto", this.hass.language)}</b> —
+              ${localize("mode.auto_desc", this.hass.language)}<br />
+              <b>${localize("mode.heat_only", this.hass.language)}</b> —
+              ${localize("mode.heat_only_desc", this.hass.language)}<br />
+              <b>${localize("mode.cool_only", this.hass.language)}</b> —
+              ${localize("mode.cool_only_desc", this.hass.language)}
             </div>
             <rs-climate-mode-selector
               .climateMode=${this._climateMode}
@@ -311,8 +322,12 @@ export class RsRoomDetail extends LitElement {
             editable
             .editing=${this._editingSchedule}
             .doneLabel=${localize("schedule.done", this.hass.language)}
-            @edit-click=${() => { this._editingSchedule = true; }}
-            @done-click=${() => { this._editingSchedule = false; }}
+            @edit-click=${() => {
+              this._editingSchedule = true;
+            }}
+            @done-click=${() => {
+              this._editingSchedule = false;
+            }}
           >
             <rs-schedule-settings
               .hass=${this.hass}
@@ -332,18 +347,20 @@ export class RsRoomDetail extends LitElement {
               @eco-heat-changed=${this._onEcoHeatChanged}
               @eco-cool-changed=${this._onEcoCoolChanged}
             ></rs-schedule-settings>
-            ${this.config ? html`
-              <rs-override-section
-                .hass=${this.hass}
-                .config=${this.config}
-                .climateMode=${this._climateMode}
-                .comfortHeat=${this._comfortHeat}
-                .comfortCool=${this._comfortCool}
-                .ecoHeat=${this._ecoHeat}
-                .ecoCool=${this._ecoCool}
-                .language=${this.hass.language}
-              ></rs-override-section>
-            ` : nothing}
+            ${this.config
+              ? html`
+                  <rs-override-section
+                    .hass=${this.hass}
+                    .config=${this.config}
+                    .climateMode=${this._climateMode}
+                    .comfortHeat=${this._comfortHeat}
+                    .comfortCool=${this._comfortCool}
+                    .ecoHeat=${this._ecoHeat}
+                    .ecoCool=${this._ecoCool}
+                    .language=${this.hass.language}
+                  ></rs-override-section>
+                `
+              : nothing}
           </rs-section-card>
 
           ${this._error ? html`<div class="error">${this._error}</div>` : nothing}
@@ -356,8 +373,12 @@ export class RsRoomDetail extends LitElement {
             editable
             .editing=${this._editingDevices}
             .doneLabel=${localize("devices.done", this.hass.language)}
-            @edit-click=${() => { this._editingDevices = true; }}
-            @done-click=${() => { this._editingDevices = false; }}
+            @edit-click=${() => {
+              this._editingDevices = true;
+            }}
+            @done-click=${() => {
+              this._editingDevices = false;
+            }}
           >
             <rs-device-section
               .hass=${this.hass}
@@ -402,36 +423,40 @@ export class RsRoomDetail extends LitElement {
             editable
             .editing=${this._editingCovers}
             .doneLabel=${localize("covers.done", this.hass.language)}
-            @edit-click=${() => { this._editingCovers = true; }}
-            @done-click=${() => { this._editingCovers = false; }}
+            @edit-click=${() => {
+              this._editingCovers = true;
+            }}
+            @done-click=${() => {
+              this._editingCovers = false;
+            }}
           >
             <div slot="info">
-              <b>${localize("covers.info.selection_title", this.hass.language)}</b><br>
+              <b>${localize("covers.info.selection_title", this.hass.language)}</b><br />
               ${localize("covers.info.selection_body", this.hass.language)}
-              <br><br>
-              <b>${localize("covers.info.schedule_title", this.hass.language)}</b><br>
+              <br /><br />
+              <b>${localize("covers.info.schedule_title", this.hass.language)}</b><br />
               ${localize("covers.info.schedule_body", this.hass.language)}
-              <div class="yaml-block"><span class="yaml-key">schedule</span>:
-  <span class="yaml-key">cover_evening</span>:
-    <span class="yaml-key">name</span>: <span class="yaml-value">Cover Evening</span>
-    <span class="yaml-key">monday</span>:
-      - <span class="yaml-key">from</span>: <span class="yaml-value">"20:00:00"</span>
-        <span class="yaml-key">to</span>: <span class="yaml-value">"06:00:00"</span>
-        <span class="yaml-key">data</span>:
-          <span class="yaml-key">position</span>: <span class="yaml-value">10</span></div>
-              <b>${localize("covers.info.solar_title", this.hass.language)}</b><br>
+              <div class="yaml-block">
+                <span class="yaml-key">schedule</span>: <span class="yaml-key">cover_evening</span>:
+                <span class="yaml-key">name</span>: <span class="yaml-value">Cover Evening</span>
+                <span class="yaml-key">monday</span>: - <span class="yaml-key">from</span>:
+                <span class="yaml-value">"20:00:00"</span> <span class="yaml-key">to</span>:
+                <span class="yaml-value">"06:00:00"</span> <span class="yaml-key">data</span>:
+                <span class="yaml-key">position</span>: <span class="yaml-value">10</span>
+              </div>
+              <b>${localize("covers.info.solar_title", this.hass.language)}</b><br />
               ${localize("covers.info.solar_body", this.hass.language)}
-              <br><br>
-              <b>${localize("covers.info.night_title", this.hass.language)}</b><br>
+              <br /><br />
+              <b>${localize("covers.info.night_title", this.hass.language)}</b><br />
               ${localize("covers.info.night_body", this.hass.language)}
-              <br><br>
-              <b>${localize("covers.info.override_title", this.hass.language)}</b><br>
+              <br /><br />
+              <b>${localize("covers.info.override_title", this.hass.language)}</b><br />
               ${localize("covers.info.override_body", this.hass.language)}
-              <br><br>
-              <b>${localize("covers.info.priority_title", this.hass.language)}</b><br>
+              <br /><br />
+              <b>${localize("covers.info.priority_title", this.hass.language)}</b><br />
               ${localize("covers.info.priority_body", this.hass.language)}
-              <br><br>
-              <b>${localize("covers.info.entities_title", this.hass.language)}</b><br>
+              <br /><br />
+              <b>${localize("covers.info.entities_title", this.hass.language)}</b><br />
               ${localize("covers.info.entities_body", this.hass.language)}
             </div>
             <rs-covers-section
@@ -502,7 +527,7 @@ export class RsRoomDetail extends LitElement {
   }
 
   private _onClimateToggle(
-    e: CustomEvent<{ entityId: string; checked: boolean; detectedType: "thermostat" | "ac" }>
+    e: CustomEvent<{ entityId: string; checked: boolean; detectedType: "thermostat" | "ac" }>,
   ) {
     const { entityId, checked, detectedType } = e.detail;
     if (checked) {
@@ -526,9 +551,7 @@ export class RsRoomDetail extends LitElement {
     this._autoSave();
   }
 
-  private _onDeviceTypeChange(
-    e: CustomEvent<{ entityId: string; type: "thermostat" | "ac" }>
-  ) {
+  private _onDeviceTypeChange(e: CustomEvent<{ entityId: string; type: "thermostat" | "ac" }>) {
     const { entityId, type } = e.detail;
     const newThermostats = new Set(this._selectedThermostats);
     const newAcs = new Set(this._selectedAcs);
@@ -546,9 +569,7 @@ export class RsRoomDetail extends LitElement {
     this._autoSave();
   }
 
-  private _onSensorSelected(
-    e: CustomEvent<{ entityId: string; type: "temp" | "humidity" }>
-  ) {
+  private _onSensorSelected(e: CustomEvent<{ entityId: string; type: "temp" | "humidity" }>) {
     if (e.detail.type === "temp") {
       this._selectedTempSensor = e.detail.entityId;
     } else {
@@ -557,9 +578,7 @@ export class RsRoomDetail extends LitElement {
     this._autoSave();
   }
 
-  private _onWindowSensorToggle(
-    e: CustomEvent<{ entityId: string; checked: boolean }>
-  ) {
+  private _onWindowSensorToggle(e: CustomEvent<{ entityId: string; checked: boolean }>) {
     const { entityId, checked } = e.detail;
     const next = new Set(this._selectedWindowSensors);
     if (checked) {
@@ -587,7 +606,11 @@ export class RsRoomDetail extends LitElement {
   }
 
   private _onExternalEntityAdded(
-    e: CustomEvent<{ entityId: string; category: "climate" | "temp" | "humidity" | "window"; detectedType?: "thermostat" | "ac" }>
+    e: CustomEvent<{
+      entityId: string;
+      category: "climate" | "temp" | "humidity" | "window";
+      detectedType?: "thermostat" | "ac";
+    }>,
   ) {
     const { entityId, category, detectedType } = e.detail;
     if (category === "climate") {
@@ -644,7 +667,8 @@ export class RsRoomDetail extends LitElement {
     else if (key === "covers_outdoor_min_temp") this._coversOutdoorMinTemp = value as number | null;
     else if (key === "covers_override_minutes") this._coversOverrideMinutes = value as number;
     else if (key === "cover_schedules") this._coverSchedules = value as CoverScheduleEntry[];
-    else if (key === "cover_schedule_selector_entity") this._coverScheduleSelectorEntity = value as string;
+    else if (key === "cover_schedule_selector_entity")
+      this._coverScheduleSelectorEntity = value as string;
     else if (key === "covers_night_close") this._coversNightClose = value as boolean;
     else if (key === "covers_night_position") this._coversNightPosition = value as number;
     this._autoSave();
@@ -664,7 +688,7 @@ export class RsRoomDetail extends LitElement {
   }
 
   private async _doSave() {
-    fireSaveStatus(this,"saving");
+    fireSaveStatus(this, "saving");
     this._error = "";
 
     try {
@@ -685,7 +709,7 @@ export class RsRoomDetail extends LitElement {
         comfort_cool: this._comfortCool,
         eco_heat: this._ecoHeat,
         eco_cool: this._ecoCool,
-        presence_persons: this._selectedPresencePersons.filter(p => p),
+        presence_persons: this._selectedPresencePersons.filter((p) => p),
         display_name: this._displayName,
         heating_system_type: this._heatingSystemType,
         covers: [...this._selectedCovers],
@@ -701,22 +725,23 @@ export class RsRoomDetail extends LitElement {
       });
 
       this._dirty = false;
-      fireSaveStatus(this,"saved");
+      fireSaveStatus(this, "saved");
 
       this.dispatchEvent(
         new CustomEvent("room-updated", {
           bubbles: true,
           composed: true,
-        })
+        }),
       );
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : localize("room.error_save_fallback", this.hass.language);
+        err instanceof Error
+          ? err.message
+          : localize("room.error_save_fallback", this.hass.language);
       this._error = message;
-      fireSaveStatus(this,"error");
+      fireSaveStatus(this, "error");
     }
   }
-
 }
 
 declare global {

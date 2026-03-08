@@ -6,8 +6,7 @@ import "./shared/rs-badge";
 const PENCIL_PATH =
   "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z";
 
-const CHECK_PATH =
-  "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z";
+const CHECK_PATH = "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z";
 
 @customElement("rs-section-card")
 export class RsSectionCard extends LitElement {
@@ -130,7 +129,9 @@ export class RsSectionCard extends LitElement {
             : nothing}
         </div>
         ${this._infoExpanded
-          ? html`<div class="section-info"><div class="info-panel"><slot name="info"></slot></div></div>`
+          ? html`<div class="section-info">
+              <div class="info-panel"><slot name="info"></slot></div>
+            </div>`
           : nothing}
         <div class="section-body">
           <slot></slot>
@@ -144,15 +145,11 @@ export class RsSectionCard extends LitElement {
   }
 
   private _onEditClick() {
-    this.dispatchEvent(
-      new CustomEvent("edit-click", { bubbles: true, composed: true })
-    );
+    this.dispatchEvent(new CustomEvent("edit-click", { bubbles: true, composed: true }));
   }
 
   private _onDoneClick() {
-    this.dispatchEvent(
-      new CustomEvent("done-click", { bubbles: true, composed: true })
-    );
+    this.dispatchEvent(new CustomEvent("done-click", { bubbles: true, composed: true }));
   }
 }
 

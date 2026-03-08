@@ -11,7 +11,9 @@ export const infoIconStyles = css`
     opacity: 0.3;
     cursor: pointer;
     flex-shrink: 0;
-    transition: opacity 0.15s, color 0.15s;
+    transition:
+      opacity 0.15s,
+      color 0.15s;
   }
 
   .info-icon:hover {
@@ -52,6 +54,10 @@ export const infoIconStyles = css`
     overflow-x: auto;
     color: var(--primary-text-color);
   }
-  .info-panel .yaml-key { color: #0550ae; }
-  .info-panel .yaml-value { color: #0a3069; }
+  .info-panel .yaml-key {
+    color: #0550ae;
+  }
+  .info-panel .yaml-value {
+    color: #0a3069;
+  }
 `;

@@ -40,9 +40,7 @@ export class RsThresholdField extends LitElement {
         type="number"
         @input=${this._onInput}
       ></ha-textfield>
-      ${this.hint
-        ? html`<div class="hint">${this.hint}</div>`
-        : nothing}
+      ${this.hint ? html`<div class="hint">${this.hint}</div>` : nothing}
     `;
   }
 
@@ -54,7 +52,7 @@ export class RsThresholdField extends LitElement {
           detail: val,
           bubbles: true,
           composed: true,
-        })
+        }),
       );
     }
   }

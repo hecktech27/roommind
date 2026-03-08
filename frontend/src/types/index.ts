@@ -125,11 +125,7 @@ export interface GlobalSettings {
 // HA types for panel integration
 export interface HomeAssistant {
   callWS: <T>(msg: Record<string, unknown>) => Promise<T>;
-  callService: (
-    domain: string,
-    service: string,
-    data?: Record<string, unknown>
-  ) => Promise<void>;
+  callService: (domain: string, service: string, data?: Record<string, unknown>) => Promise<void>;
   states: Record<string, HassEntity>;
   areas: Record<string, HassArea>;
   floors?: Record<string, HassFloor>;
