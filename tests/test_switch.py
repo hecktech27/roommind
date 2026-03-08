@@ -4,7 +4,12 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.roommind.switch import RoomMindCoverAutoSwitch, _create_room_switches
+from custom_components.roommind.switch import (
+    RoomMindCoverAutoSwitch,
+    _create_room_switches,
+    async_setup_entry,
+)
+from custom_components.roommind.const import DOMAIN
 
 
 @pytest.fixture
@@ -83,3 +88,58 @@ async def test_cover_auto_switch_turn_on_store_raises_keyerror(mock_coordinator)
     switch = RoomMindCoverAutoSwitch(coordinator, "nonexistent")
     with pytest.raises(KeyError):
         await switch.async_turn_on()
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_creates_entities_for_rooms_with_covers():
+    """async_setup_entry creates switch entities for rooms with covers configured."""
+    coordinator = MagicMock()
+    coordinator._switch_entity_areas = set()
+    coordinator.hass = MagicMock()
+    coordinator.hass.data = {DOMAIN: {"store": MagicMock()}}
+
+    store = MagicMock()
+    store.get_rooms.return_value = {
+        "living_room": {"covers": ["cover.blinds"]},
+        "bedroom": {},  # no covers
+    }
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator, "store": store}}
+
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, entry, async_add_entities)
+
+    assert coordinator.async_add_switch_entities is async_add_entities
+    async_add_entities.assert_called_once()
+    entities = async_add_entities.call_args[0][0]
+    assert len(entities) == 1
+    assert isinstance(entities[0], RoomMindCoverAutoSwitch)
+    assert "living_room" in coordinator._switch_entity_areas
+    assert "bedroom" not in coordinator._switch_entity_areas
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_no_covers_no_entities():
+    """async_setup_entry does not call async_add_entities when no rooms have covers."""
+    coordinator = MagicMock()
+    coordinator._switch_entity_areas = set()
+
+    store = MagicMock()
+    store.get_rooms.return_value = {"bedroom": {}}
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator, "store": store}}
+
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, entry, async_add_entities)
+
+    async_add_entities.assert_not_called()

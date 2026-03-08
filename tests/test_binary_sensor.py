@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.roommind.binary_sensor import RoomMindCoverPausedSensor, _create_room_binary_sensors
+from custom_components.roommind.binary_sensor import (
+    RoomMindCoverPausedSensor,
+    _create_room_binary_sensors,
+    async_setup_entry,
+)
+from custom_components.roommind.const import DOMAIN
 
 
 @pytest.fixture
@@ -61,3 +66,59 @@ def test_cover_paused_coordinator_data_none(mock_coordinator):
     mock_coordinator.data = None
     sensor = RoomMindCoverPausedSensor(mock_coordinator, "living_room")
     assert sensor.is_on is False
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_creates_entities_for_rooms_with_covers():
+    """async_setup_entry creates binary sensors for rooms with covers configured."""
+    coordinator = MagicMock()
+    coordinator._binary_sensor_entity_areas = set()
+
+    store = MagicMock()
+    store.get_rooms.return_value = {
+        "living_room": {"covers": ["cover.blinds"]},
+        "bedroom": {},  # no covers — should be skipped
+    }
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator, "store": store}}
+
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, entry, async_add_entities)
+
+    # Callback stored on coordinator
+    assert coordinator.async_add_binary_sensor_entities is async_add_entities
+    # Only living_room has covers, so one entity created
+    async_add_entities.assert_called_once()
+    entities = async_add_entities.call_args[0][0]
+    assert len(entities) == 1
+    assert isinstance(entities[0], RoomMindCoverPausedSensor)
+    # Area tracked
+    assert "living_room" in coordinator._binary_sensor_entity_areas
+    assert "bedroom" not in coordinator._binary_sensor_entity_areas
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_no_covers_no_entities():
+    """async_setup_entry does not call async_add_entities when no rooms have covers."""
+    coordinator = MagicMock()
+    coordinator._binary_sensor_entity_areas = set()
+
+    store = MagicMock()
+    store.get_rooms.return_value = {"bedroom": {}}
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {entry.entry_id: coordinator, "store": store}}
+
+    async_add_entities = MagicMock()
+
+    await async_setup_entry(hass, entry, async_add_entities)
+
+    async_add_entities.assert_not_called()
