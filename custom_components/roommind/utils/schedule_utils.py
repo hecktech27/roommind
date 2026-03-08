@@ -34,7 +34,7 @@ def resolve_target_at_time(
     Returns None when the action is "off" (devices should be turned off).
     """
     # 1. Override
-    if override_until is not None and ts < override_until and override_temp is not None:
+    if override_temp is not None and (override_until is None or ts < override_until):
         return float(override_temp)
     # 2. Vacation
     if vacation_until is not None and ts < vacation_until and vacation_temp is not None:
@@ -94,7 +94,7 @@ def resolve_targets_at_time(
     Returns TargetTemps(heat, cool). None values mean "force off".
     """
     # 1. Override — single-point target
-    if override_until is not None and ts < override_until and override_temp is not None:
+    if override_temp is not None and (override_until is None or ts < override_until):
         t = float(override_temp)
         return TargetTemps(heat=t, cool=t)
     # 2. Vacation — heat setback, cooling stays at eco_cool

@@ -288,7 +288,12 @@ export class RsHeroStatus extends LitElement {
   private _updateCountdown(): void {
     this._clearCountdownTimer();
     const until = this._getOverrideUntil();
-    if (!until) { this._countdown = ""; return; }
+    if (!until) {
+      // Check if it's a permanent override (active but no until)
+      const ov = this._getEffectiveOverride();
+      this._countdown = ov ? localize("hero.permanent", this.hass?.language ?? "en") : "";
+      return;
+    }
 
     const update = () => {
       const u = this._getOverrideUntil();

@@ -9,7 +9,7 @@ DOMAIN = "roommind"
 VERSION = "1.3.4"
 
 # Platforms
-PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR, Platform.CLIMATE]
 
 # Climate modes
 CLIMATE_MODE_AUTO = "auto"
@@ -124,11 +124,15 @@ COVER_MIN_IDLE_FOR_LEARNED: int = 30    # Min idle observations before trusting 
 
 def build_override_live(room: dict) -> dict:
     """Build override fields for live data from a room config dict."""
+    override_temp = room.get("override_temp")
     override_until = room.get("override_until")
-    active = bool(override_until is not None and time.time() < override_until)
+    active = bool(
+        override_temp is not None
+        and (override_until is None or time.time() < override_until)
+    )
     return {
         "override_active": active,
         "override_type": room.get("override_type") if active else None,
-        "override_temp": room.get("override_temp") if active else None,
+        "override_temp": override_temp if active else None,
         "override_until": override_until if active else None,
     }

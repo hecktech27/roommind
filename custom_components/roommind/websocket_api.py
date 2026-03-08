@@ -294,7 +294,7 @@ async def websocket_delete_room(
         vol.Required("area_id"): str,
         vol.Required("override_type"): vol.In(OVERRIDE_TYPES),
         vol.Optional("temperature"): vol.Coerce(float),
-        vol.Required("duration"): vol.Coerce(float),  # hours
+        vol.Optional("duration"): vol.Coerce(float),  # hours (omit or 0 for permanent)
     }
 )
 @websocket_api.async_response
@@ -307,7 +307,7 @@ async def websocket_override_set(
     store = hass.data[DOMAIN]["store"]
     area_id = msg["area_id"]
     override_type = msg["override_type"]
-    duration_hours = msg["duration"]
+    duration_hours = msg.get("duration")
 
     room = store.get_room(area_id)
     if room is None:
@@ -333,7 +333,7 @@ async def websocket_override_set(
             connection.send_error(msg["id"], "invalid", "Custom override requires temperature")
             return
 
-    override_until = time.time() + duration_hours * 3600
+    override_until = (time.time() + duration_hours * 3600) if duration_hours else None
 
     await store.async_update_room(area_id, {
         "override_temp": override_temp,

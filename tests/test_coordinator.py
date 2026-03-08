@@ -582,6 +582,29 @@ class TestRoomMindCoordinator:
         assert room_state["override_active"] is False
 
     @pytest.mark.asyncio
+    async def test_permanent_override_takes_priority(self, hass, mock_config_entry):
+        """Permanent override (override_until=None) takes priority over schedule."""
+        room_with_override = {
+            **SAMPLE_ROOM,
+            "override_temp": 23.0,
+            "override_until": None,
+            "override_type": "custom",
+        }
+        store = _make_store_mock({"living_room_abc12345": room_with_override})
+        hass.data = {"roommind": {"store": store}}
+
+        hass.states.get = MagicMock(side_effect=make_mock_states_get(schedule_state="off"))
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        data = await coordinator._async_update_data()
+
+        room_state = data["rooms"]["living_room_abc12345"]
+        assert room_state["target_temp"] == 23.0
+        assert room_state["override_active"] is True
+        assert room_state["override_type"] == "custom"
+
+    @pytest.mark.asyncio
     async def test_get_active_schedule_index_no_selector(self, hass, mock_config_entry):
         """With 2 schedules and no selector, returns 0."""
         room = {

@@ -49,6 +49,7 @@
   "hero.remaining": "{time} remaining",
   "hero.humidity": "{value}% humidity",
   "hero.trv_setpoint": "Thermostat set to {value}{unit}",
+  "hero.permanent": "Permanent",
   "hero.waiting": "Waiting for sensor data...",
   "hero.not_configured": "Not configured yet",
 

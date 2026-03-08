@@ -85,6 +85,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self._mode_on_since: dict[str, float] = {}
         self._switch_entity_areas: set[str] = set()
         self._binary_sensor_entity_areas: set[str] = set()
+        self._climate_entity_areas: set[str] = set()
 
     async def _async_update_data(self) -> dict:
         """Fetch and compute state for all rooms.
@@ -455,8 +456,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         from .managers.cover_manager import CoverManager as _CM
         has_override = (
             room.get("override_temp") is not None
-            and room.get("override_until") is not None
-            and room.get("override_until", 0) > time.time()
+            and (room.get("override_until") is None or room.get("override_until", 0) > time.time())
         )
         # Use the appropriate target for cover decisions
         cover_target = (
@@ -837,14 +837,14 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         Returns TargetTemps(heat, cool). None values mean "force off".
         """
         # 1. Override — single-point target
+        override_temp = room.get("override_temp")
         override_until = room.get("override_until")
-        if override_until is not None:
-            if time.time() < override_until:
-                override_temp = room.get("override_temp")
-                if override_temp is not None:
-                    t = float(override_temp)
-                    return TargetTemps(heat=t, cool=t)
+        if override_temp is not None:
+            if override_until is None or time.time() < override_until:
+                t = float(override_temp)
+                return TargetTemps(heat=t, cool=t)
             else:
+                # Timed override has expired — auto-clear
                 area_id = room.get("area_id", "unknown")
                 store = self.hass.data[DOMAIN]["store"]
                 self.hass.async_create_task(
@@ -944,6 +944,13 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             self.async_add_entities(entities)
             self._entity_areas.add(area_id)
 
+        # Climate entities (override control): always create
+        if area_id not in self._climate_entity_areas and hasattr(self, "async_add_climate_entities") and self.async_add_climate_entities:
+            from .climate import _create_room_climates
+
+            self.async_add_climate_entities(_create_room_climates(self, area_id))
+            self._climate_entity_areas.add(area_id)
+
         # Cover entities: only create when covers are configured.
         # Not removed on save — cleanup_orphaned_entities() handles that at startup
         # so brief config changes don't break user automations.
@@ -989,6 +996,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self._mode_on_since.pop(area_id, None)
         self._switch_entity_areas.discard(area_id)
         self._binary_sensor_entity_areas.discard(area_id)
+        self._climate_entity_areas.discard(area_id)
         self._model_manager.remove_room(area_id)
         if self._history_store:
             await self.hass.async_add_executor_job(self._history_store.remove_room, area_id)
@@ -1007,7 +1015,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         registry = er.async_get(self.hass)
 
         # Known valid suffixes for each condition
-        always_valid = ("_target_temp", "_mode")
+        always_valid = ("_target_temp", "_mode", "_override")
         cover_only = ("_cover_auto", "_cover_paused")
 
         to_remove: list[str] = []

@@ -21,7 +21,7 @@ export class RsOverrideSection extends LitElement {
   @state() private _optimisticOverride: {
     type: OverrideType;
     temp: number;
-    until: number;
+    until: number | null;
   } | null = null;
   @state() private _optimisticClear = false;
 

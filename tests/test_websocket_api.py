@@ -532,6 +532,37 @@ async def test_override_clear(ws_hass, store, connection):
 
 
 @pytest.mark.asyncio
+async def test_override_set_without_duration_permanent(ws_hass, store, connection):
+    """Setting override without duration creates a permanent override."""
+    await store.async_load()
+
+    save_msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "perm",
+        "comfort_temp": 22.0,
+        "eco_temp": 17.0,
+    }
+    await _save_room(ws_hass, connection, save_msg)
+    connection.send_result.reset_mock()
+
+    msg = {
+        "id": 3,
+        "type": "roommind/override/set",
+        "area_id": "perm",
+        "override_type": "custom",
+        "temperature": 24.0,
+    }
+    await _override_set(ws_hass, connection, msg)
+
+    connection.send_result.assert_called_once_with(3, {"success": True})
+    room = store.get_room("perm")
+    assert room["override_temp"] == 24.0
+    assert room["override_until"] is None
+    assert room["override_type"] == "custom"
+
+
+@pytest.mark.asyncio
 async def test_override_set_nonexistent_room_errors(ws_hass, store, connection):
     """Setting override on nonexistent room sends an error."""
     await store.async_load()
