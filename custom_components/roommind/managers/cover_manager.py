@@ -12,6 +12,7 @@ from ..const import (
     COVER_HYSTERESIS,
     COVER_MAX_EFFECTIVENESS,
     COVER_MIN_HOLD_SECONDS,
+    COVER_POS_DEADBAND,
     COVER_POS_SCALE,
     COVER_SOLAR_MIN,
     COVER_USER_CONFLICT_THRESHOLD,
@@ -109,11 +110,9 @@ class CoverManager:
         cover_entity_ids: list[str],
         covers_deploy_threshold: float,
         covers_min_position: int,
-        covers_outdoor_min_temp: float | None,
         predicted_peak_temp: float | None,
         target_temp: float,
         q_solar: float,
-        outdoor_temp: float | None,
         has_active_override: bool,
         forced_position: int | None = None,
         forced_reason: str = "",
@@ -157,15 +156,7 @@ class CoverManager:
         was_forced = state.last_was_forced
         state.last_was_forced = False
 
-        # Gate 4: Cold weather — we want solar gain, not shading (skip if gate disabled)
-        if covers_outdoor_min_temp is not None and outdoor_temp is not None and outdoor_temp < covers_outdoor_min_temp:
-            if current < 100:
-                if not was_forced and (time.time() - state.last_change_ts) < COVER_MIN_HOLD_SECONDS:
-                    return CoverDecision(target_position=current, changed=False, reason="min_hold_time")
-                return self._apply_change(state, 100, "cold_weather_retract")
-            return CoverDecision(target_position=100, changed=False, reason="cold_weather")
-
-        # Gate 5: Not actually sunny
+        # Gate 4: Not actually sunny
         if q_solar < COVER_SOLAR_MIN:
             if current < 100:
                 if not was_forced and (time.time() - state.last_change_ts) < COVER_MIN_HOLD_SECONDS:
@@ -191,9 +182,9 @@ class CoverManager:
         if not was_forced and (now - state.last_change_ts) < COVER_MIN_HOLD_SECONDS:
             return CoverDecision(target_position=current, changed=False, reason="min_hold_time")
 
-        # No change needed
-        if desired_pos == current:
-            return CoverDecision(target_position=desired_pos, changed=False, reason="at_target")
+        # Deadband: ignore small position changes to avoid motor wear
+        if abs(desired_pos - current) <= COVER_POS_DEADBAND:
+            return CoverDecision(target_position=current, changed=False, reason="deadband")
 
         reason = f"deploy(excess={excess:.2f}°C→pos={desired_pos}%)" if desired_pos < 100 else "retract"
         return self._apply_change(state, desired_pos, reason)

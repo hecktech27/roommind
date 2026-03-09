@@ -78,7 +78,6 @@ export interface RoomConfig {
   covers_auto_enabled?: boolean;
   covers_deploy_threshold?: number;
   covers_min_position?: number;
-  covers_outdoor_min_temp?: number | null;
   covers_override_minutes?: number;
   cover_schedules?: CoverScheduleEntry[];
   cover_schedule_selector_entity?: string;

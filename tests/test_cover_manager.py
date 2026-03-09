@@ -5,10 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.roommind.const import (
+    COVER_CONFIDENCE_REFERENCE_SOLAR,
     COVER_HYSTERESIS,
+    COVER_LINEAR_LOOKAHEAD_H,
     COVER_MAX_EFFECTIVENESS,
+    COVER_MAX_PREDICTION_STD,
     COVER_MIN_HOLD_SECONDS,
+    COVER_POS_DEADBAND,
     COVER_POS_SCALE,
+    COVER_PREDICTION_DT_MINUTES,
+    COVER_RC_LOOKAHEAD_H,
     COVER_SOLAR_MIN,
     COVER_USER_CONFLICT_THRESHOLD,
     COVER_USER_OVERRIDE_MINUTES,
@@ -29,6 +35,12 @@ def test_cover_constants_exist():
     assert COVER_MAX_EFFECTIVENESS == 0.85
     assert COVER_USER_CONFLICT_THRESHOLD == 15
     assert COVER_USER_OVERRIDE_MINUTES == 60
+    assert COVER_POS_DEADBAND == 5
+    assert COVER_PREDICTION_DT_MINUTES == 5.0
+    assert COVER_RC_LOOKAHEAD_H == 2.0
+    assert COVER_LINEAR_LOOKAHEAD_H == 1.0
+    assert COVER_MAX_PREDICTION_STD == 0.5
+    assert COVER_CONFIDENCE_REFERENCE_SOLAR == 0.5
 
 
 # ── Store defaults ─────────────────────────────────────────────────────
@@ -93,12 +105,10 @@ _BASE_KWARGS = dict(
     cover_entity_ids=["cover.living_room"],
     covers_deploy_threshold=1.5,
     covers_min_position=0,
-    covers_outdoor_min_temp=10.0,
     has_active_override=False,
     forced_position=None,
     forced_reason="",
     q_solar=0.5,
-    outdoor_temp=20.0,
 )
 
 
@@ -126,50 +136,10 @@ def test_no_deploy_in_hysteresis_band():
 
 def test_no_deploy_low_solar():
     mgr = CoverManager()
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-    d = mgr.evaluate("lr", predicted_peak_temp=26.0, target_temp=22.0, q_solar=0.05, outdoor_temp=20.0, **kwargs)
+    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+    d = mgr.evaluate("lr", predicted_peak_temp=26.0, target_temp=22.0, q_solar=0.05, **kwargs)
     assert d.changed is False
     assert "solar" in d.reason
-
-
-def test_no_deploy_cold_outdoor():
-    mgr = CoverManager()
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "outdoor_temp"}
-    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, outdoor_temp=5.0, **kwargs)
-    assert d.changed is False
-    assert "cold" in d.reason
-
-
-def test_cold_weather_retracts_if_closed():
-    mgr = CoverManager()
-    mgr._get_state("lr").current_position = 40
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "outdoor_temp"}
-    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, outdoor_temp=5.0, **kwargs)
-    assert d.changed is True
-    assert d.target_position == 100
-
-
-def test_cold_weather_retract_respects_hold_time():
-    """Retract on cold weather must also respect minimum hold time."""
-    mgr = CoverManager()
-    with patch("custom_components.roommind.managers.cover_manager.time") as mock_t:
-        # First: deploy blinds
-        mock_t.time.return_value = 10000.0
-        d1 = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, **_BASE_KWARGS)
-        assert d1.changed is True
-
-        # 30s later: cold weather → retract should be BLOCKED by hold time
-        mock_t.time.return_value = 10030.0
-        kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "outdoor_temp"}
-        d2 = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, outdoor_temp=5.0, **kwargs)
-        assert d2.changed is False
-        assert "hold_time" in d2.reason
-
-        # After hold time expires: retract succeeds
-        mock_t.time.return_value = 10000.0 + COVER_MIN_HOLD_SECONDS + 1
-        d3 = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, outdoor_temp=5.0, **kwargs)
-        assert d3.changed is True
-        assert d3.target_position == 100
 
 
 def test_min_hold_time_prevents_rapid_cycling():
@@ -192,8 +162,8 @@ def test_position_changes_after_hold_time():
         mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, **_BASE_KWARGS)
 
         mock_t.time.return_value = 10000.0 + COVER_MIN_HOLD_SECONDS + 1
-        kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-        d = mgr.evaluate("lr", predicted_peak_temp=22.3, target_temp=22.0, q_solar=0.05, outdoor_temp=20.0, **kwargs)
+        kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+        d = mgr.evaluate("lr", predicted_peak_temp=22.3, target_temp=22.0, q_solar=0.05, **kwargs)
         assert d.changed is True
         assert d.target_position == 100
 
@@ -338,8 +308,8 @@ def test_low_solar_retract_respects_hold_time():
 
         # 30s later: clouds appear → low solar → retract blocked by hold time
         mock_t.time.return_value = 10030.0
-        kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-        d2 = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, q_solar=0.05, outdoor_temp=20.0, **kwargs)
+        kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+        d2 = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, q_solar=0.05, **kwargs)
         assert d2.changed is False
         assert "hold_time" in d2.reason
 
@@ -615,8 +585,8 @@ def test_normal_thermal_still_rate_limited(mock_t):
     mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, **_BASE_KWARGS)
     # 30s later: thermal wants to change, but hold time blocks it
     mock_t.time.return_value = 1030.0
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-    d = mgr.evaluate("lr", predicted_peak_temp=22.0, target_temp=22.0, q_solar=0.05, outdoor_temp=20.0, **kwargs)
+    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+    d = mgr.evaluate("lr", predicted_peak_temp=22.0, target_temp=22.0, q_solar=0.05, **kwargs)
     assert d.changed is False
     assert "hold_time" in d.reason
 
@@ -665,34 +635,12 @@ def test_empty_cover_entity_ids_disabled():
     assert "disabled" in d.reason
 
 
-def test_outdoor_gate_disabled_when_none():
-    """covers_outdoor_min_temp=None disables cold weather gate."""
-    mgr = CoverManager()
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "outdoor_temp"}
-    kwargs["covers_outdoor_min_temp"] = None
-    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, outdoor_temp=2.0, **kwargs)
-    # Cold outdoor (2°C) but gate disabled → thermal logic runs, deploys
-    assert d.changed is True
-    assert "deploy" in d.reason
-
-
-def test_outdoor_temp_none_skips_cold_gate():
-    """outdoor_temp=None with gate configured should skip cold weather gate."""
-    mgr = CoverManager()
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "outdoor_temp"}
-    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, outdoor_temp=None, **kwargs)
-    assert d.changed is True
-    assert "deploy" in d.reason
-
-
 def test_solar_boundary_at_exact_min():
     """q_solar exactly at COVER_SOLAR_MIN (0.15) should still trigger low_solar."""
     mgr = CoverManager()
     mgr._get_state("lr").current_position = 50
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-    d = mgr.evaluate(
-        "lr", predicted_peak_temp=25.0, target_temp=22.0, q_solar=COVER_SOLAR_MIN, outdoor_temp=20.0, **kwargs
-    )
+    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, q_solar=COVER_SOLAR_MIN, **kwargs)
     # q_solar == 0.15, check < 0.15 is False → solar gate does NOT trigger
     assert "low_solar" not in d.reason
 
@@ -701,8 +649,8 @@ def test_solar_just_below_min_retracts():
     """q_solar just below COVER_SOLAR_MIN retracts covers."""
     mgr = CoverManager()
     mgr._get_state("lr").current_position = 50
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, q_solar=0.14, outdoor_temp=20.0, **kwargs)
+    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=22.0, q_solar=0.14, **kwargs)
     assert d.changed is True
     assert d.target_position == 100
     assert "low_solar" in d.reason
@@ -718,25 +666,46 @@ def test_min_position_100_prevents_closing():
     assert d.changed is False
 
 
-@patch("custom_components.roommind.managers.cover_manager.time")
-def test_forced_to_cold_weather_retract_immediate(mock_t):
-    """After forced position ends, cold weather retract skips hold time."""
-    mock_t.time.return_value = 1000.0
+# ── Deadband tests ─────────────────────────────────────────────────────
+
+
+def test_deadband_prevents_small_changes():
+    """Cover at 63%, desired would be 62% → no change (within 5% deadband)."""
     mgr = CoverManager()
-    # Night close forces covers shut
-    mgr.evaluate(
-        "lr",
-        predicted_peak_temp=22.0,
-        target_temp=22.0,
-        **{**_BASE_KWARGS, "forced_position": 0, "forced_reason": "night"},
+    mgr.update_position("r", 63)
+    # excess = 25.04 - 22 = 3.04, raw_close = int((3.04-1.5)*25) = 38, desired = max(0, 100-38) = 62
+    d = mgr.evaluate("r", **{**_BASE_KWARGS, "predicted_peak_temp": 25.04, "target_temp": 22.0})
+    assert not d.changed
+    assert d.reason == "deadband"
+    assert d.target_position == 63  # stays at current
+
+
+def test_deadband_allows_large_changes():
+    """Cover at 63%, desired would be 50% → change (>5% deadband)."""
+    mgr = CoverManager()
+    mgr.update_position("r", 63)
+    # excess = 25.52 - 22 = 3.52, raw_close = int((3.52-1.5)*25) = 50, desired = max(0, 100-50) = 50
+    d = mgr.evaluate("r", **{**_BASE_KWARGS, "predicted_peak_temp": 25.52, "target_temp": 22.0})
+    assert d.changed
+    assert d.target_position == 50
+
+
+def test_deadband_boundary_exact_threshold():
+    """At exactly 5% difference → no change; at 6% → change."""
+    mgr = CoverManager()
+    mgr.update_position("r", 75)
+    # desired=70 → diff=5 → deadband
+    d = mgr.evaluate(
+        "r", **{**_BASE_KWARGS, "predicted_peak_temp": 24.7, "target_temp": 22.0, "covers_deploy_threshold": 1.5}
     )
-    # Next cycle: schedule inactive, cold weather → retract immediately
-    mock_t.time.return_value = 1030.0
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "outdoor_temp"}
-    d = mgr.evaluate("lr", predicted_peak_temp=22.0, target_temp=22.0, outdoor_temp=2.0, **kwargs)
-    assert d.changed is True
-    assert d.target_position == 100
-    assert "cold_weather" in d.reason
+    assert not d.changed
+    assert d.reason == "deadband"
+    # desired=69 → diff=6 → change
+    d2 = mgr.evaluate(
+        "r", **{**_BASE_KWARGS, "predicted_peak_temp": 24.75, "target_temp": 22.0, "covers_deploy_threshold": 1.5}
+    )
+    assert d2.changed
+    assert d2.target_position == 69
 
 
 @patch("custom_components.roommind.managers.cover_manager.time")
@@ -752,8 +721,8 @@ def test_forced_to_low_solar_retract_immediate(mock_t):
     )
     # Next cycle: schedule inactive, low solar → retract immediately
     mock_t.time.return_value = 1030.0
-    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k not in ("q_solar", "outdoor_temp")}
-    d = mgr.evaluate("lr", predicted_peak_temp=22.0, target_temp=22.0, q_solar=0.05, outdoor_temp=20.0, **kwargs)
+    kwargs = {k: v for k, v in _BASE_KWARGS.items() if k != "q_solar"}
+    d = mgr.evaluate("lr", predicted_peak_temp=22.0, target_temp=22.0, q_solar=0.05, **kwargs)
     assert d.changed is True
     assert d.target_position == 100
     assert "low_solar" in d.reason

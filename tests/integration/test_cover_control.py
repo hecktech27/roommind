@@ -329,7 +329,7 @@ class TestCoverIntegration:
         ):
             await coordinator._async_update_data()
 
-        # With temp=24, q_solar=0.8, simple prediction: 24 + 3.0*0.8*1.0 = 26.4
+        # With temp=24, q_solar=0.8, linear fallback: 24 + 3.0*0.8*1.0 = 26.4
         # excess = 26.4 - 21.0 = 5.4 > threshold 1.5 → deploy
         cover_calls = [c for c in coordinator.hass.services.async_call.call_args_list if c[0][0] == "cover"]
         assert len(cover_calls) > 0, "Expected cover deploy via solar prediction"
@@ -396,3 +396,30 @@ class TestCoverIntegration:
         # With override active, covers should NOT be deployed despite solar
         cover_calls = [c for c in coordinator.hass.services.async_call.call_args_list if c[0][0] == "cover"]
         assert len(cover_calls) == 0, "No cover calls expected when override is active"
+
+    @pytest.mark.asyncio
+    async def test_solar_overheating_deploys_in_cold_weather(self, coordinator, real_store):
+        """Covers deploy when solar overheats room, even if outdoor temp is 5C (cold-weather gate removed)."""
+        await setup_room(real_store, ROOM_WITH_COVERS_AUTO)
+        coordinator.hass.states.get = MagicMock(
+            side_effect=make_hass_states(
+                temp="23.0",
+                outdoor_temp="5.0",
+                extra={
+                    "cover.lr_blind": ("open", {"current_position": 100, "supported_features": 4}),
+                },
+            )
+        )
+
+        # High solar irradiance causing overheating despite cold outdoor temp
+        with patch(
+            "custom_components.roommind.coordinator.compute_q_solar_norm",
+            return_value=0.9,
+        ):
+            await coordinator._async_update_data()
+
+        # Linear fallback: 23 + 3.0*0.9*1.0 = 25.7
+        # excess = 25.7 - 21.0 = 4.7 > threshold 1.5 → deploy
+        # Old behavior would have blocked this (outdoor 5 < gate 10)
+        cover_calls = [c for c in coordinator.hass.services.async_call.call_args_list if c[0][0] == "cover"]
+        assert len(cover_calls) > 0, "Covers should deploy despite cold outdoor temp when solar causes overheating"

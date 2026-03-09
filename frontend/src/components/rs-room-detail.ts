@@ -56,7 +56,6 @@ export class RsRoomDetail extends LitElement {
   @state() private _coversAutoEnabled = false;
   @state() private _coversDeployThreshold = 1.5;
   @state() private _coversMinPosition = 0;
-  @state() private _coversOutdoorMinTemp: number | null = 10.0;
   @state() private _coversOverrideMinutes = 60;
   @state() private _coverSchedules: CoverScheduleEntry[] = [];
   @state() private _coverScheduleSelectorEntity = "";
@@ -205,10 +204,6 @@ export class RsRoomDetail extends LitElement {
       this._coversAutoEnabled = this.config.covers_auto_enabled ?? false;
       this._coversDeployThreshold = this.config.covers_deploy_threshold ?? 1.5;
       this._coversMinPosition = this.config.covers_min_position ?? 0;
-      this._coversOutdoorMinTemp =
-        this.config.covers_outdoor_min_temp !== undefined
-          ? this.config.covers_outdoor_min_temp
-          : 10.0;
       this._coversOverrideMinutes = this.config.covers_override_minutes ?? 60;
       this._coverSchedules = this.config.cover_schedules ?? [];
       this._coverScheduleSelectorEntity = this.config.cover_schedule_selector_entity ?? "";
@@ -236,7 +231,6 @@ export class RsRoomDetail extends LitElement {
       this._coversAutoEnabled = false;
       this._coversDeployThreshold = 1.5;
       this._coversMinPosition = 0;
-      this._coversOutdoorMinTemp = 10.0;
       this._coversOverrideMinutes = 60;
       this._coverSchedules = [];
       this._coverScheduleSelectorEntity = "";
@@ -467,7 +461,6 @@ export class RsRoomDetail extends LitElement {
               .autoEnabled=${this._coversAutoEnabled}
               .deployThreshold=${this._coversDeployThreshold}
               .minPosition=${this._coversMinPosition}
-              .outdoorMinTemp=${this._coversOutdoorMinTemp}
               .overrideMinutes=${this._coversOverrideMinutes}
               .coverSchedules=${this._coverSchedules}
               .coverScheduleSelectorEntity=${this._coverScheduleSelectorEntity}
@@ -664,7 +657,6 @@ export class RsRoomDetail extends LitElement {
     if (key === "covers_auto_enabled") this._coversAutoEnabled = value as boolean;
     else if (key === "covers_deploy_threshold") this._coversDeployThreshold = value as number;
     else if (key === "covers_min_position") this._coversMinPosition = value as number;
-    else if (key === "covers_outdoor_min_temp") this._coversOutdoorMinTemp = value as number | null;
     else if (key === "covers_override_minutes") this._coversOverrideMinutes = value as number;
     else if (key === "cover_schedules") this._coverSchedules = value as CoverScheduleEntry[];
     else if (key === "cover_schedule_selector_entity")
@@ -716,7 +708,6 @@ export class RsRoomDetail extends LitElement {
         covers_auto_enabled: this._coversAutoEnabled,
         covers_deploy_threshold: this._coversDeployThreshold,
         covers_min_position: this._coversMinPosition,
-        covers_outdoor_min_temp: this._coversOutdoorMinTemp,
         covers_override_minutes: this._coversOverrideMinutes,
         cover_schedules: this._coverSchedules,
         cover_schedule_selector_entity: this._coverScheduleSelectorEntity,

@@ -119,8 +119,13 @@ COVER_MAX_EFFECTIVENESS: float = 0.85
 COVER_USER_CONFLICT_THRESHOLD: int = 15
 COVER_USER_OVERRIDE_MINUTES: int = 60
 COVER_DEFAULT_BETA_S: float = 3.0  # °C/h per unit q_solar (default for rooms without learned data)
-COVER_SOLAR_LOOKAHEAD_H: float = 1.0  # 1 hour lookahead for simple solar prediction
+COVER_LINEAR_LOOKAHEAD_H: float = 1.0  # linear fallback: 1h (no heat-loss correction → keep short)
+COVER_RC_LOOKAHEAD_H: float = 2.0  # RC trajectory: 2h (physics-corrected → longer horizon is safe)
+COVER_PREDICTION_DT_MINUTES: float = 5.0  # time step for RC trajectory simulation
+COVER_MAX_PREDICTION_STD: float = 0.5  # max idle+solar prediction_std to activate RC tier
+COVER_CONFIDENCE_REFERENCE_SOLAR: float = 0.5  # reference q_solar for confidence check
 COVER_MIN_IDLE_FOR_LEARNED: int = 30  # Min idle observations before trusting EKF's beta_s
+COVER_POS_DEADBAND: int = 5  # min position change (%) to trigger motor movement
 
 
 def build_override_live(room: dict) -> dict:

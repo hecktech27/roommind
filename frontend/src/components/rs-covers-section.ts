@@ -16,7 +16,6 @@ export class RsCoverSection extends LitElement {
   @property({ type: Boolean }) public autoEnabled = false;
   @property({ type: Number }) public deployThreshold = 1.5;
   @property({ type: Number }) public minPosition = 0;
-  @property({ type: Number, attribute: false }) public outdoorMinTemp: number | null = 10.0;
   @property({ type: Number }) public overrideMinutes = 60;
   @property({ type: Boolean }) public autoPaused = false;
   @property({ attribute: false }) public coverSchedules: CoverScheduleEntry[] = [];
@@ -383,33 +382,7 @@ export class RsCoverSection extends LitElement {
                             this._emit("covers_min_position", e.detail)}
                         ></rs-threshold-field>
                       </div>
-                      <rs-toggle-row
-                        .label=${localize("covers.outdoor_gate", l)}
-                        .hint=${localize("covers.outdoor_gate_hint", l)}
-                        .checked=${this.outdoorMinTemp !== null}
-                        @toggle-changed=${(e: CustomEvent) => {
-                          if (e.detail) {
-                            this._emit("covers_outdoor_min_temp", 10.0);
-                          } else {
-                            this._emit("covers_outdoor_min_temp", null);
-                          }
-                        }}
-                      ></rs-toggle-row>
                       <div class="field-row">
-                        ${this.outdoorMinTemp !== null
-                          ? html`
-                              <rs-threshold-field
-                                .label=${localize("covers.outdoor_min_temp", l)}
-                                .value=${this.outdoorMinTemp}
-                                .min=${0}
-                                .max=${35}
-                                .step=${1}
-                                suffix="°C"
-                                @value-changed=${(e: CustomEvent) =>
-                                  this._emit("covers_outdoor_min_temp", e.detail)}
-                              ></rs-threshold-field>
-                            `
-                          : nothing}
                         <rs-threshold-field
                           .label=${localize("covers.override_minutes", l)}
                           .hint=${localize("covers.override_minutes_hint", l)}

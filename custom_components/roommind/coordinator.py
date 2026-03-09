@@ -162,6 +162,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         # Read weather forecast once for all rooms
         outdoor_forecast = await self._weather_manager.async_read_forecast(settings)
 
+        # Update cover orchestrator with cloud forecast for solar trajectory prediction
+        self._cover_orchestrator.set_cloud_series(WeatherManager.extract_cloud_series(outdoor_forecast))
+
         # Compute solar irradiance once per cycle
         cloud_coverage = None
         weather_entity = settings.get("weather_entity")

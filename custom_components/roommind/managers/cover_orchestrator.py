@@ -8,9 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..const import (
+    COVER_CONFIDENCE_REFERENCE_SOLAR,
     COVER_DEFAULT_BETA_S,
+    COVER_LINEAR_LOOKAHEAD_H,
+    COVER_MAX_PREDICTION_STD,
     COVER_MIN_IDLE_FOR_LEARNED,
-    COVER_SOLAR_LOOKAHEAD_H,
+    COVER_PREDICTION_DT_MINUTES,
+    COVER_RC_LOOKAHEAD_H,
     MODE_COOLING,
     TargetTemps,
 )
@@ -20,7 +24,7 @@ from ..control.mpc_controller import (
     get_can_heat_cool,
     is_mpc_active,
 )
-from ..control.solar import solar_elevation
+from ..control.solar import build_solar_series, solar_elevation
 from ..utils.schedule_utils import resolve_schedule_index
 from .cover_manager import CoverDecision, CoverManager, compute_shading_factor
 
@@ -62,6 +66,11 @@ class CoverOrchestrator:
         self.hass = hass
         self._cover_manager = cover_manager
         self._model_manager = model_manager
+        self._cloud_series: list[float | None] | None = None
+
+    def set_cloud_series(self, cloud_series: list[float | None] | None) -> None:
+        """Update cloud forecast for solar trajectory prediction."""
+        self._cloud_series = cloud_series
 
     def read_positions(self, area_id: str, room: dict[str, Any]) -> CoverPositionResult:
         """Read current cover positions from HA state and update cover manager."""
@@ -173,7 +182,9 @@ class CoverOrchestrator:
         # Block D: Tiered prediction
         _cover_predicted_peak = predicted_peak_temp
         if _cover_predicted_peak is None:
-            _cover_predicted_peak = self._estimate_solar_peak_temp(area_id, current_temp, cover_target, q_solar)
+            _cover_predicted_peak = self._estimate_solar_peak_temp(
+                area_id, current_temp, cover_target, q_solar, outdoor_temp
+            )
 
         # Block E: Evaluate + apply
         cover_eids = room.get("covers", [])
@@ -183,11 +194,9 @@ class CoverOrchestrator:
             cover_entity_ids=cover_eids,
             covers_deploy_threshold=room.get("covers_deploy_threshold", 1.5),
             covers_min_position=room.get("covers_min_position", 0),
-            covers_outdoor_min_temp=room.get("covers_outdoor_min_temp"),
             predicted_peak_temp=_cover_predicted_peak,
             target_temp=cover_target,
             q_solar=q_solar,
-            outdoor_temp=outdoor_temp,
             has_active_override=has_override,
             forced_position=_forced_position,
             forced_reason=_forced_reason,
@@ -215,19 +224,65 @@ class CoverOrchestrator:
         current_temp: float | None,
         target_temp: float,
         q_solar: float,
+        outdoor_temp: float | None,
     ) -> float:
-        """Estimate peak temperature from solar gain using learned or default beta_s."""
+        """Estimate peak temperature from solar gain.
+
+        Tier 1: RC model trajectory (idle model confident, incl. heat loss physics)
+        Tier 2: Conservative linear fallback with default beta_s
+        """
+        base_temp = current_temp if current_temp is not None else target_temp
+
         try:
             n_idle, _, _ = self._model_manager.get_mode_counts(area_id)
-            if n_idle >= COVER_MIN_IDLE_FOR_LEARNED:
-                beta_s = self._model_manager.get_model(area_id).Q_solar
-            else:
-                beta_s = COVER_DEFAULT_BETA_S
+            if (
+                n_idle >= COVER_MIN_IDLE_FOR_LEARNED
+                and outdoor_temp is not None
+                and self._idle_solar_model_confident(area_id, base_temp, outdoor_temp)
+            ):
+                # Tier 1: RC model trajectory with proper physics
+                model = self._model_manager.get_model(area_id)
+                n_steps = int(COVER_RC_LOOKAHEAD_H * 60 / COVER_PREDICTION_DT_MINUTES)
+                solar_series = build_solar_series(
+                    self.hass.config.latitude,
+                    self.hass.config.longitude,
+                    n_steps,
+                    dt_minutes=COVER_PREDICTION_DT_MINUTES,
+                    cloud_series=self._cloud_series,
+                )
+                trajectory = model.predict_trajectory(
+                    base_temp,
+                    [outdoor_temp] * n_steps,
+                    [0.0] * n_steps,
+                    COVER_PREDICTION_DT_MINUTES,
+                    q_solar_series=solar_series,
+                )
+                return max(trajectory)
         except Exception:  # noqa: BLE001
-            beta_s = COVER_DEFAULT_BETA_S
+            pass
 
-        base_temp = current_temp if current_temp is not None else target_temp
-        return base_temp + beta_s * q_solar * COVER_SOLAR_LOOKAHEAD_H
+        # Tier 2: Conservative linear fallback with default beta_s
+        return base_temp + COVER_DEFAULT_BETA_S * q_solar * COVER_LINEAR_LOOKAHEAD_H
+
+    def _idle_solar_model_confident(self, area_id: str, T_room: float, T_outdoor: float) -> bool:
+        """Check if idle model with solar is confident enough for trajectory prediction.
+
+        Uses a reference q_solar to include beta_s uncertainty (P[4][4]) in the check.
+        When beta_s hasn't learned from solar data yet, P[4][4] remains high,
+        making prediction_std exceed the threshold -> falls back to linear.
+        """
+        try:
+            pred_std = self._model_manager.get_prediction_std(
+                area_id,
+                0.0,
+                T_room,
+                T_outdoor,
+                COVER_PREDICTION_DT_MINUTES,
+                q_solar=COVER_CONFIDENCE_REFERENCE_SOLAR,
+            )
+            return pred_std < COVER_MAX_PREDICTION_STD
+        except Exception:  # noqa: BLE001
+            return False
 
     def get_current_position(self, area_id: str) -> int:
         """Delegate to CoverManager.get_current_position."""

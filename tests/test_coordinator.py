@@ -4201,24 +4201,33 @@ class TestCoverageGaps:
     # _estimate_solar_peak_temp — learned beta_s and exception paths
     # ------------------------------------------------------------------
     def test_estimate_solar_peak_temp_learned_beta_s(self, hass, mock_config_entry):
-        """Uses EKF-learned beta_s when enough idle observations exist."""
-        from custom_components.roommind.const import COVER_MIN_IDLE_FOR_LEARNED, COVER_SOLAR_LOOKAHEAD_H
+        """Uses RC trajectory when idle model is confident (Tier 1)."""
+        from custom_components.roommind.const import COVER_MIN_IDLE_FOR_LEARNED
 
         coordinator = _create_coordinator(hass, mock_config_entry)
 
         # Mock model manager with enough idle data
         coordinator._model_manager.get_mode_counts = MagicMock(return_value=(COVER_MIN_IDLE_FOR_LEARNED, 10, 5))
         mock_model = MagicMock()
-        mock_model.Q_solar = 5.0  # learned beta_s
+        mock_model.predict_trajectory = MagicMock(return_value=[22.0, 22.5, 23.0, 23.5, 24.0])
         coordinator._model_manager.get_model = MagicMock(return_value=mock_model)
 
-        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
-        expected = 20.0 + 5.0 * 0.5 * COVER_SOLAR_LOOKAHEAD_H
-        assert result == pytest.approx(expected)
+        with (
+            patch.object(coordinator._cover_orchestrator, "_idle_solar_model_confident", return_value=True),
+            patch(
+                "custom_components.roommind.managers.cover_orchestrator.build_solar_series",
+                return_value=[0.3, 0.4, 0.5, 0.6, 0.7],
+            ),
+        ):
+            result = coordinator._cover_orchestrator._estimate_solar_peak_temp(
+                "room1", 20.0, 22.0, 0.5, outdoor_temp=15.0
+            )
+
+        assert result == pytest.approx(24.0)
 
     def test_estimate_solar_peak_temp_not_enough_idle(self, hass, mock_config_entry):
-        """Falls back to default beta_s when not enough idle observations."""
-        from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_SOLAR_LOOKAHEAD_H
+        """Falls back to linear when not enough idle observations (Tier 2)."""
+        from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_LINEAR_LOOKAHEAD_H
 
         coordinator = _create_coordinator(hass, mock_config_entry)
 
@@ -4226,33 +4235,141 @@ class TestCoverageGaps:
             return_value=(5, 10, 5)  # n_idle < 30
         )
 
-        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
-        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_SOLAR_LOOKAHEAD_H
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5, outdoor_temp=15.0)
+        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
     def test_estimate_solar_peak_temp_exception_fallback(self, hass, mock_config_entry):
-        """Falls back to default beta_s when model manager raises."""
-        from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_SOLAR_LOOKAHEAD_H
+        """Falls back to linear when model manager raises."""
+        from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_LINEAR_LOOKAHEAD_H
 
         coordinator = _create_coordinator(hass, mock_config_entry)
 
         coordinator._model_manager.get_mode_counts = MagicMock(side_effect=RuntimeError("no model"))
 
-        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
-        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_SOLAR_LOOKAHEAD_H
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5, outdoor_temp=15.0)
+        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
     def test_estimate_solar_peak_temp_no_current_temp(self, hass, mock_config_entry):
         """Uses target_temp as base when current_temp is None."""
-        from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_SOLAR_LOOKAHEAD_H
+        from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_LINEAR_LOOKAHEAD_H
 
         coordinator = _create_coordinator(hass, mock_config_entry)
 
         coordinator._model_manager.get_mode_counts = MagicMock(return_value=(5, 0, 0))
 
-        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", None, 22.0, 0.5)
-        expected = 22.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_SOLAR_LOOKAHEAD_H
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", None, 22.0, 0.5, outdoor_temp=15.0)
+        expected = 22.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
+
+    def test_estimate_solar_peak_model_not_confident_uses_linear(self, hass, mock_config_entry):
+        """When prediction_std >= 0.5 (model not confident), fall back to linear."""
+        from custom_components.roommind.const import (
+            COVER_DEFAULT_BETA_S,
+            COVER_LINEAR_LOOKAHEAD_H,
+            COVER_MIN_IDLE_FOR_LEARNED,
+        )
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        # Enough idle data, but model not confident
+        coordinator._model_manager.get_mode_counts = MagicMock(return_value=(COVER_MIN_IDLE_FOR_LEARNED, 10, 5))
+
+        with patch.object(coordinator._cover_orchestrator, "_idle_solar_model_confident", return_value=False):
+            result = coordinator._cover_orchestrator._estimate_solar_peak_temp(
+                "room1", 20.0, 22.0, 0.5, outdoor_temp=15.0
+            )
+
+        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
+        assert result == pytest.approx(expected)
+
+    def test_estimate_solar_peak_outdoor_none_uses_linear(self, hass, mock_config_entry):
+        """When outdoor_temp is None, fall back to linear."""
+        from custom_components.roommind.const import (
+            COVER_DEFAULT_BETA_S,
+            COVER_LINEAR_LOOKAHEAD_H,
+            COVER_MIN_IDLE_FOR_LEARNED,
+        )
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        coordinator._model_manager.get_mode_counts = MagicMock(return_value=(COVER_MIN_IDLE_FOR_LEARNED, 10, 5))
+
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5, outdoor_temp=None)
+
+        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
+        assert result == pytest.approx(expected)
+
+    def test_idle_solar_model_confident_true(self, hass, mock_config_entry):
+        """Low prediction_std returns True."""
+        from custom_components.roommind.const import COVER_CONFIDENCE_REFERENCE_SOLAR, COVER_PREDICTION_DT_MINUTES
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        coordinator._model_manager.get_prediction_std = MagicMock(return_value=0.2)
+
+        result = coordinator._cover_orchestrator._idle_solar_model_confident("room1", 20.0, 15.0)
+
+        assert result is True
+        coordinator._model_manager.get_prediction_std.assert_called_once_with(
+            "room1",
+            0.0,
+            20.0,
+            15.0,
+            COVER_PREDICTION_DT_MINUTES,
+            q_solar=COVER_CONFIDENCE_REFERENCE_SOLAR,
+        )
+
+    def test_idle_solar_model_confident_false_high_std(self, hass, mock_config_entry):
+        """High prediction_std returns False."""
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        coordinator._model_manager.get_prediction_std = MagicMock(return_value=0.8)
+
+        result = coordinator._cover_orchestrator._idle_solar_model_confident("room1", 20.0, 15.0)
+
+        assert result is False
+
+    def test_idle_solar_model_confident_false_exception(self, hass, mock_config_entry):
+        """Exception in get_prediction_std returns False."""
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        coordinator._model_manager.get_prediction_std = MagicMock(side_effect=RuntimeError("boom"))
+
+        result = coordinator._cover_orchestrator._idle_solar_model_confident("room1", 20.0, 15.0)
+
+        assert result is False
+
+    def test_set_cloud_series_used_in_estimate(self, hass, mock_config_entry):
+        """Cloud series propagated to build_solar_series in RC trajectory."""
+        from custom_components.roommind.const import COVER_MIN_IDLE_FOR_LEARNED
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        coordinator._model_manager.get_mode_counts = MagicMock(return_value=(COVER_MIN_IDLE_FOR_LEARNED, 10, 5))
+        mock_model = MagicMock()
+        mock_model.predict_trajectory = MagicMock(return_value=[22.0, 23.0, 24.0])
+        coordinator._model_manager.get_model = MagicMock(return_value=mock_model)
+
+        cloud_series = [50.0, 60.0, 70.0]
+        coordinator._cover_orchestrator.set_cloud_series(cloud_series)
+
+        with (
+            patch.object(coordinator._cover_orchestrator, "_idle_solar_model_confident", return_value=True),
+            patch(
+                "custom_components.roommind.managers.cover_orchestrator.build_solar_series",
+                return_value=[0.3, 0.4, 0.5],
+            ) as mock_build,
+        ):
+            result = coordinator._cover_orchestrator._estimate_solar_peak_temp(
+                "room1", 20.0, 22.0, 0.5, outdoor_temp=15.0
+            )
+
+        assert result == pytest.approx(24.0)
+        # Verify cloud_series was passed through
+        _, kwargs = mock_build.call_args
+        assert kwargs["cloud_series"] == cloud_series
 
     # ------------------------------------------------------------------
     # Prediction exception path (lines 197-198)
