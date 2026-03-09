@@ -1009,9 +1009,9 @@ class TestRoomMindCoordinator:
         assert room_state["window_open"] is False
 
         # EKF accumulator must be cleared (not carried over into next cycle)
-        assert "living_room_abc12345" not in coordinator._ekf_accumulated_dt
-        assert "living_room_abc12345" not in coordinator._ekf_accumulated_mode
-        assert "living_room_abc12345" not in coordinator._ekf_accumulated_pf
+        assert "living_room_abc12345" not in coordinator._ekf_training._accumulated_dt
+        assert "living_room_abc12345" not in coordinator._ekf_training._accumulated_mode
+        assert "living_room_abc12345" not in coordinator._ekf_training._accumulated_pf
 
         # k_window must not be learned during the delay period
         mock_win_update.assert_not_called()
@@ -1776,14 +1776,14 @@ class TestCoordinatorMPCIntegration:
 
         coordinator = _create_coordinator(hass, mock_config_entry)
         # Set a previous temp so the model update has T_old available
-        coordinator._last_temps["learning_room"] = 18.0
+        coordinator._ekf_training.last_temps["learning_room"] = 18.0
 
         data = await coordinator._async_update_data()
 
         room_state = data["rooms"]["learning_room"]
         assert room_state["current_temp"] == 18.5
         # Verify the model was updated (last_temps should now have the new value)
-        assert coordinator._last_temps["learning_room"] == 18.5
+        assert coordinator._ekf_training.last_temps["learning_room"] == 18.5
 
     @pytest.mark.asyncio
     async def test_coordinator_mpc_idle_at_target(self, hass, mock_config_entry):
@@ -3018,30 +3018,30 @@ class TestReadDeviceTemp:
 
 
 class TestFlushEkfAccumulator:
-    """Tests for _flush_ekf_accumulator."""
+    """Tests for EkfTrainingManager.flush."""
 
     def test_no_accumulated_data(self, hass, mock_config_entry):
         """Flush with no accumulated data is a no-op."""
         coordinator = _create_coordinator(hass, mock_config_entry)
         # Should not raise
-        coordinator._flush_ekf_accumulator("room_a", 20.0, 5.0, {"thermostats": [], "acs": []})
+        coordinator._ekf_training.flush("room_a", 20.0, 5.0, can_heat=True, can_cool=False, q_solar=0.0)
 
     def test_accumulated_without_mode(self, hass, mock_config_entry):
         """Flush with accumulated dt but no mode is a no-op."""
         coordinator = _create_coordinator(hass, mock_config_entry)
-        coordinator._ekf_accumulated_dt["room_a"] = 3.0
+        coordinator._ekf_training._accumulated_dt["room_a"] = 3.0
         # prev_mode not set -> should not call update
-        coordinator._flush_ekf_accumulator("room_a", 20.0, 5.0, {"thermostats": [], "acs": []})
+        coordinator._ekf_training.flush("room_a", 20.0, 5.0, can_heat=True, can_cool=False, q_solar=0.0)
 
     def test_accumulated_with_mode_calls_update(self, hass, mock_config_entry):
         """Flush with accumulated data and mode calls model update."""
         coordinator = _create_coordinator(hass, mock_config_entry)
-        coordinator._ekf_accumulated_dt["room_a"] = 3.0
-        coordinator._ekf_accumulated_mode["room_a"] = "heating"
-        coordinator._ekf_accumulated_pf["room_a"] = 0.8
+        coordinator._ekf_training._accumulated_dt["room_a"] = 3.0
+        coordinator._ekf_training._accumulated_mode["room_a"] = "heating"
+        coordinator._ekf_training._accumulated_pf["room_a"] = 0.8
 
         with patch.object(coordinator._model_manager, "update") as mock_update:
-            coordinator._flush_ekf_accumulator("room_a", 20.0, 5.0, {"thermostats": [], "acs": []})
+            coordinator._ekf_training.flush("room_a", 20.0, 5.0, can_heat=True, can_cool=False, q_solar=0.0)
             mock_update.assert_called_once()
 
 
@@ -4212,7 +4212,7 @@ class TestCoverageGaps:
         mock_model.Q_solar = 5.0  # learned beta_s
         coordinator._model_manager.get_model = MagicMock(return_value=mock_model)
 
-        result = coordinator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
         expected = 20.0 + 5.0 * 0.5 * COVER_SOLAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
@@ -4226,7 +4226,7 @@ class TestCoverageGaps:
             return_value=(5, 10, 5)  # n_idle < 30
         )
 
-        result = coordinator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_SOLAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
@@ -4238,7 +4238,7 @@ class TestCoverageGaps:
 
         coordinator._model_manager.get_mode_counts = MagicMock(side_effect=RuntimeError("no model"))
 
-        result = coordinator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5)
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_SOLAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
@@ -4250,7 +4250,7 @@ class TestCoverageGaps:
 
         coordinator._model_manager.get_mode_counts = MagicMock(return_value=(5, 0, 0))
 
-        result = coordinator._estimate_solar_peak_temp("room1", None, 22.0, 0.5)
+        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", None, 22.0, 0.5)
         expected = 22.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_SOLAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
@@ -4346,7 +4346,7 @@ class TestCoverageGaps:
 
         # Make is_mpc_active raise
         with patch(
-            "custom_components.roommind.coordinator.is_mpc_active",
+            "custom_components.roommind.managers.cover_orchestrator.is_mpc_active",
             side_effect=RuntimeError("mpc check failed"),
         ):
             result = await coordinator._async_update_data()
@@ -4416,7 +4416,7 @@ class TestCoverageGaps:
 
         # Mock solar_elevation to return negative (nighttime)
         with patch(
-            "custom_components.roommind.coordinator.solar_elevation",
+            "custom_components.roommind.managers.cover_orchestrator.solar_elevation",
             return_value=-5.0,
         ):
             result = await coordinator._async_update_data()

@@ -815,7 +815,9 @@ def _make_coordinator_with_model(ws_hass):
     mgr.update("room_a", 20.5, 5.0, "heating", 5)
     mgr.update("room_b", 24.5, 30.0, "cooling", 5)
     mock_coordinator._model_manager = mgr
-    mock_coordinator._last_temps = {"room_a": 20.5, "room_b": 24.5}
+    mock_coordinator._ekf_training = MagicMock()
+    mock_coordinator._ekf_training.last_temps = {"room_a": 20.5, "room_b": 24.5}
+    mock_coordinator._cover_orchestrator = MagicMock()
     mock_coordinator._history_store = MagicMock()
     mock_coordinator._history_store.remove_room = MagicMock()
     ws_hass.data[DOMAIN]["coordinator"] = mock_coordinator
@@ -866,7 +868,7 @@ async def test_thermal_reset_all(ws_hass, store, connection):
     # Persisted thermal data empty
     assert store.get_thermal_data() == {}
     # last_temps cleared
-    assert len(coordinator._last_temps) == 0
+    assert len(coordinator._ekf_training.last_temps) == 0
 
 
 @pytest.mark.asyncio

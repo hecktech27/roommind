@@ -572,7 +572,7 @@ async def websocket_thermal_reset(
     # Clear learned model and residual heat tracking
     if coordinator:
         coordinator._model_manager.remove_room(area_id)
-        coordinator._last_temps.pop(area_id, None)
+        coordinator._ekf_training.last_temps.pop(area_id, None)
         coordinator._residual_tracker.clear_room(area_id)
 
     # Clear persisted thermal data
@@ -606,7 +606,9 @@ async def websocket_thermal_reset_all(
     if coordinator:
         room_ids = list(coordinator._model_manager._estimators.keys())
         coordinator._model_manager = RoomModelManager()
-        coordinator._last_temps.clear()
+        coordinator._ekf_training._model_manager = coordinator._model_manager
+        coordinator._cover_orchestrator._model_manager = coordinator._model_manager
+        coordinator._ekf_training.last_temps.clear()
         coordinator._residual_tracker.clear_all()
 
     # Clear persisted thermal data
