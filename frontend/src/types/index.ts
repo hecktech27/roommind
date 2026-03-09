@@ -175,6 +175,7 @@ export interface AnalyticsDataPoint {
   predicted_temp: number | null;
   window_open: boolean;
   heating_power: number | null;
+  solar_irradiance: number | null;
   blind_position?: number | null;
 }
 
