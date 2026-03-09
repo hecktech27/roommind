@@ -85,9 +85,19 @@ async def async_turn_off_climate(
         return
 
     # Redundancy: skip if already at fallback temp
-    current_temp_setting = state.attributes.get("temperature")
-    if current_temp_setting is not None and round(current_temp_setting, 1) == round(fallback_temp, 1):
-        return
+    is_range = state.attributes.get("target_temp_low") is not None
+    if is_range:
+        cur_check = (
+            state.attributes.get("target_temp_low") if not is_cooling else state.attributes.get("target_temp_high")
+        )
+        if cur_check is not None and round(cur_check, 1) == round(fallback_temp, 1):
+            return
+        svc_data: dict = {"entity_id": entity_id, "target_temp_low": fallback_temp, "target_temp_high": fallback_temp}
+    else:
+        current_temp_setting = state.attributes.get("temperature")
+        if current_temp_setting is not None and round(current_temp_setting, 1) == round(fallback_temp, 1):
+            return
+        svc_data = {"entity_id": entity_id, "temperature": fallback_temp}
 
     _LOGGER.debug(
         "Area '%s': device '%s' has no 'off' mode, setting temperature to %s as fallback",
@@ -99,7 +109,7 @@ async def async_turn_off_climate(
         await hass.services.async_call(
             "climate",
             "set_temperature",
-            {"entity_id": entity_id, "temperature": fallback_temp},
+            svc_data,
             blocking=True,
         )
     except Exception:  # noqa: BLE001
@@ -653,7 +663,9 @@ class MPCController:
             for eid in thermostats:
                 if can_heat and ha_heat_target is not None:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ha_heat_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ha_heat_target}, temp_intent="heat"
+                    )
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
             for eid in self.acs:
@@ -664,16 +676,32 @@ class MPCController:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
                 elif "heat_cool" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat_cool"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ac_target})
+                    # Dual-setpoint: send both targets when device uses range mode
+                    ac_state_now = self.hass.states.get(eid)
+                    is_range = ac_state_now and ac_state_now.attributes.get("target_temp_low") is not None
+                    if is_range and ha_heat_target is not None and ha_cool_target is not None:
+                        low = min(ha_heat_target, ha_cool_target)
+                        high = max(ha_heat_target, ha_cool_target)
+                        await self._call(
+                            "set_temperature", {"entity_id": eid, "target_temp_low": low, "target_temp_high": high}
+                        )
+                    else:
+                        await self._call("set_temperature", {"entity_id": eid, "temperature": ac_target})
                 elif can_cool and "cool" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "cool"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ac_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ac_target}, temp_intent="cool"
+                    )
                 elif can_heat and "heat" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ac_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ac_target}, temp_intent="heat"
+                    )
                 elif "auto" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "auto"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ac_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ac_target}, temp_intent="heat"
+                    )
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
             return
@@ -694,7 +722,7 @@ class MPCController:
             ha_trv = celsius_to_ha_temp(self.hass, trv_target)
             for eid in thermostats:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
-                await self._call("set_temperature", {"entity_id": eid, "temperature": ha_trv})
+                await self._call("set_temperature", {"entity_id": eid, "temperature": ha_trv}, temp_intent="heat")
             # ACs: proportional setpoint in Full Control, actual target otherwise
             if self.has_external_sensor and current_temp is not None:
                 ac_heat_target = round(
@@ -711,13 +739,19 @@ class MPCController:
                 ac_modes = (ac_state.attributes.get("hvac_modes") or []) if ac_state else []
                 if "heat" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ha_ac_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ha_ac_target}, temp_intent="heat"
+                    )
                 elif "heat_cool" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat_cool"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ha_ac_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ha_ac_target}, temp_intent="heat"
+                    )
                 elif "auto" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "auto"})
-                    await self._call("set_temperature", {"entity_id": eid, "temperature": ha_ac_target})
+                    await self._call(
+                        "set_temperature", {"entity_id": eid, "temperature": ha_ac_target}, temp_intent="heat"
+                    )
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
         elif mode == MODE_COOLING:
@@ -733,14 +767,14 @@ class MPCController:
             ha_target = celsius_to_ha_temp(self.hass, ac_cool_target)
             for eid in self.acs:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "cool"})
-                await self._call("set_temperature", {"entity_id": eid, "temperature": ha_target})
+                await self._call("set_temperature", {"entity_id": eid, "temperature": ha_target}, temp_intent="cool")
             for eid in thermostats:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
         elif mode == MODE_IDLE:
             for eid in thermostats + self.acs:
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
 
-    async def _call(self, service: str, data: dict) -> None:
+    async def _call(self, service: str, data: dict, *, temp_intent: str = "") -> None:
         eid = data.get("entity_id")
         state = self.hass.states.get(eid) if eid else None
 
@@ -783,15 +817,63 @@ class MPCController:
             if dev_min is not None and temp < dev_min:
                 data = {**data, "temperature": dev_min}
 
+        # Adapt for dual-setpoint devices (e.g. Bosch BTH-RM230Z):
+        # when device exposes target_temp_low/high, convert single temperature
+        # to the appropriate range format based on the caller's intent.
+        if (
+            service == "set_temperature"
+            and state
+            and "temperature" in data
+            and temp_intent
+            and state.attributes.get("target_temp_low") is not None
+        ):
+            temp = data["temperature"]
+            dev_max = state.attributes.get("max_temp", temp)
+            dev_min = state.attributes.get("min_temp", temp)
+            if temp_intent == "heat":
+                cur_high = state.attributes.get("target_temp_high", dev_max)
+                data = {k: v for k, v in data.items() if k != "temperature"}
+                data["target_temp_low"] = temp
+                data["target_temp_high"] = max(temp, cur_high)
+            elif temp_intent == "cool":
+                cur_low = state.attributes.get("target_temp_low", dev_min)
+                data = {k: v for k, v in data.items() if k != "temperature"}
+                data["target_temp_low"] = min(temp, cur_low)
+                data["target_temp_high"] = temp
+
+        # Clamp dual-setpoint data to device min/max
+        if service == "set_temperature" and state and "target_temp_low" in data:
+            dev_min = state.attributes.get("min_temp")
+            dev_max = state.attributes.get("max_temp")
+            if dev_min is not None and data["target_temp_low"] < dev_min:
+                data = {**data, "target_temp_low": dev_min}
+            if dev_max is not None and data["target_temp_high"] > dev_max:
+                data = {**data, "target_temp_high": dev_max}
+
         # Skip redundant commands (avoids IR blaster beeping every cycle)
         if state:
             if service == "set_hvac_mode" and state.state == data.get("hvac_mode"):
                 return
             if service == "set_temperature":
-                current = state.attributes.get("temperature")
-                desired = data.get("temperature")
-                if current is not None and desired is not None and round(current, 1) == round(desired, 1):
-                    return
+                if "target_temp_low" in data:
+                    cur_low = state.attributes.get("target_temp_low")
+                    cur_high = state.attributes.get("target_temp_high")
+                    des_low = data.get("target_temp_low")
+                    des_high = data.get("target_temp_high")
+                    if (
+                        cur_low is not None
+                        and des_low is not None
+                        and cur_high is not None
+                        and des_high is not None
+                        and round(cur_low, 1) == round(des_low, 1)
+                        and round(cur_high, 1) == round(des_high, 1)
+                    ):
+                        return
+                else:
+                    current = state.attributes.get("temperature")
+                    desired = data.get("temperature")
+                    if current is not None and desired is not None and round(current, 1) == round(desired, 1):
+                        return
 
         try:
             await self.hass.services.async_call("climate", service, data, blocking=True)

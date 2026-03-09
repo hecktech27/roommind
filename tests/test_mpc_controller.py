@@ -3568,3 +3568,329 @@ async def test_dynamic_ac_heating_boost():
 
     temp_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_temperature"]
     assert any(c[0][2]["temperature"] == 28.0 for c in temp_calls)
+
+
+# --- dual-setpoint support (#78) ---
+
+
+@pytest.mark.asyncio
+async def test_call_dual_setpoint_heat_intent():
+    """TRV with target_temp_low attr + temp_intent='heat' sends dual-setpoint keys."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "off"],
+        "temperature": 20.0,
+        "target_temp_low": 18.0,
+        "target_temp_high": 25.0,
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply("heating", 21.0, power_fraction=1.0, current_temp=18.0)
+
+    temp_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_temperature"]
+    assert temp_calls
+    last_data = temp_calls[-1][0][2]
+    assert "target_temp_low" in last_data
+    assert "temperature" not in last_data
+
+
+@pytest.mark.asyncio
+async def test_call_dual_setpoint_cool_intent():
+    """AC with dual-setpoint + temp_intent='cool' sets target_temp_high."""
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "off"
+    ac_state.attributes = {
+        "hvac_modes": ["cool", "off"],
+        "temperature": 22.0,
+        "target_temp_low": 18.0,
+        "target_temp_high": 25.0,
+        "min_temp": 16.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"])
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=35.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply("cooling", 23.0, power_fraction=1.0, current_temp=26.0)
+
+    temp_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_temperature"]
+    assert temp_calls
+    last_data = temp_calls[-1][0][2]
+    assert "target_temp_high" in last_data
+
+
+@pytest.mark.asyncio
+async def test_call_single_setpoint_unchanged():
+    """Device WITHOUT target_temp_low uses 'temperature' key (backward compat)."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "off"],
+        "temperature": 20.0,
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply("heating", 21.0, power_fraction=1.0, current_temp=18.0)
+
+    temp_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_temperature"]
+    assert temp_calls
+    last_data = temp_calls[-1][0][2]
+    assert "temperature" in last_data
+    assert "target_temp_low" not in last_data
+
+
+@pytest.mark.asyncio
+async def test_call_dual_setpoint_no_intent_unchanged():
+    """Device with target_temp_low but empty temp_intent uses 'temperature' key."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "off"],
+        "temperature": 20.0,
+        "target_temp_low": 18.0,
+        "target_temp_high": 25.0,
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    # Call _call directly with no temp_intent (default empty string)
+    await ctrl._call("set_temperature", {"entity_id": "climate.living_trv", "temperature": 22.0})
+
+    assert hass.services.async_call.called
+    call_data = hass.services.async_call.call_args[0][2]
+    assert "temperature" in call_data
+    assert "target_temp_low" not in call_data
+
+
+@pytest.mark.asyncio
+async def test_call_dual_setpoint_redundancy_skip():
+    """Current low/high match desired after transformation: no service call."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "off"],
+        "target_temp_low": 22.0,
+        "target_temp_high": 25.0,
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    # heat intent: low=22.0, high=max(22,25)=25.0 — matches state exactly
+    await ctrl._call("set_temperature", {"entity_id": "climate.living_trv", "temperature": 22.0}, temp_intent="heat")
+
+    hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_call_dual_setpoint_clamping():
+    """Values beyond min/max are clamped for dual-setpoint."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "off"],
+        "target_temp_low": 15.0,
+        "target_temp_high": 24.0,
+        "min_temp": 10.0,
+        "max_temp": 25.0,
+    }
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    # heat intent: low=8.0 (below min 10 → clamped to 10), high=max(8,24)=24.0
+    # low differs from state (15→10) so not redundant
+    await ctrl._call("set_temperature", {"entity_id": "climate.living_trv", "temperature": 8.0}, temp_intent="heat")
+
+    assert hass.services.async_call.called
+    call_data = hass.services.async_call.call_args[0][2]
+    assert call_data["target_temp_low"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_managed_auto_heat_cool_dual_setpoint():
+    """Managed Auto AC in heat_cool + dual-setpoint sends both targets."""
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "off"
+    ac_state.attributes = {
+        "hvac_modes": ["heat_cool", "off"],
+        "target_temp_low": 18.0,
+        "target_temp_high": 25.0,
+        "min_temp": 16.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"], climate_mode="auto")
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=False,
+    )
+    await ctrl.async_apply("heating", TargetTemps(heat=21.0, cool=25.0), power_fraction=1.0)
+
+    temp_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_temperature"]
+    assert temp_calls
+    last_data = temp_calls[-1][0][2]
+    assert "target_temp_low" in last_data
+    assert "target_temp_high" in last_data
+
+
+@pytest.mark.asyncio
+async def test_managed_auto_heat_cool_single_setpoint():
+    """Managed Auto AC in heat_cool + single-setpoint sends 'temperature'."""
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "off"
+    ac_state.attributes = {
+        "hvac_modes": ["heat_cool", "off"],
+        "temperature": 22.0,
+        "min_temp": 16.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"], climate_mode="auto")
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=False,
+    )
+    await ctrl.async_apply("heating", TargetTemps(heat=21.0, cool=25.0), power_fraction=1.0)
+
+    temp_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_temperature"]
+    assert temp_calls
+    last_data = temp_calls[-1][0][2]
+    assert "temperature" in last_data
+    assert "target_temp_low" not in last_data
+
+
+@pytest.mark.asyncio
+async def test_turn_off_dual_setpoint_heat_only():
+    """Heat-only device with dual-setpoint and no 'off' mode uses both low/high = min_temp."""
+    hass = build_hass()
+    state = MagicMock()
+    state.state = "heat"
+    state.attributes = {
+        "hvac_modes": ["heat"],
+        "target_temp_low": 20.0,
+        "target_temp_high": 25.0,
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=state)
+
+    await async_turn_off_climate(hass, "climate.trv1", area_id="test")
+
+    assert hass.services.async_call.called
+    call_data = hass.services.async_call.call_args[0][2]
+    assert call_data["target_temp_low"] == 5.0
+    assert call_data["target_temp_high"] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_heating_trv_dual_setpoint_full_control():
+    """Full Control heating with dual-setpoint TRV gets proportional target_temp_low."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "off"],
+        "temperature": 20.0,
+        "target_temp_low": 18.0,
+        "target_temp_high": 25.0,
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+    }
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    # power_fraction=0.5, current=20, boost=30: sp = 20 + 0.5*(30-20) = 25.0
+    await ctrl.async_apply("heating", 21.0, power_fraction=0.5, current_temp=20.0)
+
+    temp_calls = [
+        c
+        for c in hass.services.async_call.call_args_list
+        if c[0][1] == "set_temperature" and c[0][2].get("entity_id") == "climate.living_trv"
+    ]
+    assert temp_calls
+    call_data = temp_calls[-1][0][2]
+    assert "target_temp_low" in call_data
+    assert call_data["target_temp_low"] == 25.0

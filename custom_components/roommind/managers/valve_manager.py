@@ -124,12 +124,26 @@ class ValveManager:
                         dev_max = eid_state.attributes.get("max_temp")
                         if dev_max is not None and boost_temp > dev_max:
                             boost_temp = dev_max
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_temperature",
-                        {"entity_id": eid, "temperature": boost_temp},
-                        blocking=True,
-                    )
+                    is_range = eid_state and eid_state.attributes.get("target_temp_low") is not None
+                    if is_range:
+                        cur_high = eid_state.attributes.get("target_temp_high", boost_temp)
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {
+                                "entity_id": eid,
+                                "target_temp_low": boost_temp,
+                                "target_temp_high": max(boost_temp, cur_high),
+                            },
+                            blocking=True,
+                        )
+                    else:
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": eid, "temperature": boost_temp},
+                            blocking=True,
+                        )
                     self._cycling[eid] = now
                     idle_days = int((now - last) / 86400) if last else 0
                     _LOGGER.info(
