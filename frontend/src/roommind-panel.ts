@@ -4,9 +4,7 @@ import type { HomeAssistant, HassArea, RoomConfig } from "./types";
 import { getEntitiesForArea } from "./utils/room-state";
 import { loadHaElements } from "./load-ha-elements";
 import { localize } from "./utils/localize";
-import { formatTemp, tempUnit } from "./utils/temperature";
 import { mdiEyeOff } from "./utils/icons";
-import { VACATION_SENTINEL } from "./utils/constants";
 import "./components/rs-settings";
 import "./components/rs-analytics";
 
@@ -214,44 +212,11 @@ export class RoomMindPanel extends LitElement {
       font-size: 14px;
     }
 
-    .vacation-banner {
-      margin-bottom: 20px;
-      border-left: 4px solid var(--info-color, #2196f3);
-    }
-
-    .presence-banner {
-      margin-bottom: 20px;
-      border-left: 4px solid var(--info-color, #2196f3);
-    }
-
-    .vacation-content {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 12px 16px;
-    }
-
-    .vacation-content > ha-icon {
-      --mdc-icon-size: 28px;
-      color: var(--info-color, #2196f3);
-      flex-shrink: 0;
-    }
-
-    .vacation-text {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .vacation-title {
-      font-weight: 500;
-      font-size: 14px;
-    }
-
-    .vacation-detail {
-      font-size: 13px;
-      color: var(--secondary-text-color);
+    .stats-separator {
+      width: 1px;
+      height: 28px;
+      background: var(--divider-color, #444);
+      margin: 0 4px;
     }
 
     .stats-bar {
@@ -497,6 +462,13 @@ export class RoomMindPanel extends LitElement {
     const configuredCount = areaInfos.filter((i) => i.config).length;
     const heatingCount = areaInfos.filter((i) => i.config?.live?.mode === "heating").length;
     const coolingCount = areaInfos.filter((i) => i.config?.live?.mode === "cooling").length;
+    const moldCount = areaInfos.filter(
+      (i) =>
+        i.config?.live?.mold_risk_level === "warning" ||
+        i.config?.live?.mold_risk_level === "critical",
+    ).length;
+    const hasConditionalStats =
+      this._vacationActive || (this._presenceEnabled && !this._anyoneHome) || moldCount > 0;
     const l = this.hass.language;
 
     return html`
@@ -520,6 +492,33 @@ export class RoomMindPanel extends LitElement {
                         >${coolingCount}</span
                       >
                       <span class="stat-label">${localize("panel.stat.cooling", l)}</span>
+                    </div>
+                  `
+                : nothing}
+              ${hasConditionalStats ? html`<div class="stats-separator"></div>` : nothing}
+              ${this._vacationActive
+                ? html`
+                    <div class="stat">
+                      <span class="stat-value" style="color: var(--success-color, #4caf50)">✈</span>
+                      <span class="stat-label">${localize("panel.stat.vacation", l)}</span>
+                    </div>
+                  `
+                : nothing}
+              ${this._presenceEnabled && !this._anyoneHome
+                ? html`
+                    <div class="stat">
+                      <span class="stat-value" style="color: var(--secondary-text-color)">⏻</span>
+                      <span class="stat-label">${localize("panel.stat.away", l)}</span>
+                    </div>
+                  `
+                : nothing}
+              ${moldCount > 0
+                ? html`
+                    <div class="stat">
+                      <span class="stat-value" style="color: var(--error-color, #f44336)"
+                        >${moldCount}</span
+                      >
+                      <span class="stat-label">${localize("panel.stat.mold", l)}</span>
                     </div>
                   `
                 : nothing}
@@ -565,61 +564,6 @@ export class RoomMindPanel extends LitElement {
                   </div>
                 `,
               )}
-            </ha-card>
-          `
-        : nothing}
-      ${this._vacationActive && this._vacationTemp !== null
-        ? html`
-            <ha-card class="vacation-banner">
-              <div class="vacation-content">
-                <ha-icon icon="mdi:airplane"></ha-icon>
-                <div class="vacation-text">
-                  <span class="vacation-title"
-                    >${localize("vacation.banner_title", this.hass.language)}</span
-                  >
-                  <span class="vacation-detail"
-                    >${localize("vacation.banner_detail", this.hass.language, {
-                      temp: formatTemp(this._vacationTemp, this.hass),
-                      unit: tempUnit(this.hass),
-                      date:
-                        this._vacationUntil && this._vacationUntil < VACATION_SENTINEL
-                          ? new Date(this._vacationUntil * 1000).toLocaleString(
-                              this.hass.language,
-                              {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                              },
-                            )
-                          : localize("vacation.no_end_date", this.hass.language),
-                    })}</span
-                  >
-                </div>
-                <ha-button @click=${this._clearVacation}>
-                  ${localize("vacation.deactivate", this.hass.language)}
-                </ha-button>
-              </div>
-            </ha-card>
-          `
-        : nothing}
-      ${this._presenceEnabled && !this._anyoneHome
-        ? html`
-            <ha-card class="presence-banner">
-              <div class="vacation-content">
-                <ha-icon icon="mdi:home-off-outline"></ha-icon>
-                <div class="vacation-text">
-                  <span class="vacation-title"
-                    >${localize("presence.banner_title", this.hass.language)}</span
-                  >
-                  <span class="vacation-detail"
-                    >${localize(
-                      this._presenceAwayAction === "off"
-                        ? "presence.banner_detail_off"
-                        : "presence.banner_detail",
-                      this.hass.language,
-                    )}</span
-                  >
-                </div>
-              </div>
             </ha-card>
           `
         : nothing}
@@ -923,21 +867,6 @@ export class RoomMindPanel extends LitElement {
 
   private _onReorderDone() {
     this._reorderMode = false;
-  }
-
-  private async _clearVacation() {
-    try {
-      await this.hass.callWS({
-        type: "roommind/settings/save",
-        vacation_until: null,
-      });
-      this._vacationActive = false;
-      this._vacationTemp = null;
-      this._vacationUntil = null;
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.debug("[RoomMind] clearVacation:", err);
-    }
   }
 
   private _onRoomUpdated() {
