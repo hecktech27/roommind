@@ -185,7 +185,7 @@ class TestEvaluateHeatSources:
         hass = _make_hass(["heat", "cool"])
         room = _make_room(primary_delta=1.5)
         # delta_t = 1.0°C, below primary_delta - hysteresis (1.5 - 0.3 = 1.2)
-        result = evaluate_heat_sources(room, MODE_HEATING, 0.6, 20.0, 21.0, 0.0, "both", hass)
+        result = evaluate_heat_sources(room, MODE_HEATING, 0.6, 20.0, 21.0, 10.0, "both", hass)
 
         assert isinstance(result, HeatSourcePlan)
         assert result.active_sources == "secondary"
@@ -301,3 +301,41 @@ class TestEvaluateHeatSources:
         assert result.active_sources == "secondary"
         trv_cmds = [c for c in result.commands if c.device_type == "thermostat"]
         assert len(trv_cmds) == 0
+
+    def test_small_gap_cold_weather_prefers_primary(self):
+        """Small gap + cold outdoor should prefer primary (boiler), not AC."""
+        hass = _make_hass(["heat", "cool"])
+        room = _make_room(primary_delta=1.5, outdoor_threshold=5.0)
+        # delta_t = 0.5°C (small), outdoor = 0°C (cold, below 5°C threshold)
+        result = evaluate_heat_sources(room, MODE_HEATING, 0.6, 20.5, 21.0, 0.0, "none", hass)
+
+        assert isinstance(result, HeatSourcePlan)
+        assert result.active_sources == "primary"
+
+        trv_cmds = [c for c in result.commands if c.device_type == "thermostat"]
+        ac_cmds = [c for c in result.commands if c.device_type == "ac"]
+        assert trv_cmds[0].active
+        assert trv_cmds[0].power_fraction == 0.6
+        assert not ac_cmds[0].active
+        assert ac_cmds[0].power_fraction == 0.0
+
+    def test_escalation_from_primary_to_both(self):
+        """From 'primary' state, growing gap should escalate to 'both'."""
+        hass = _make_hass(["heat", "cool"])
+        room = _make_room(primary_delta=1.5)
+        # large_gap_threshold = 1.5 * 2.0 = 3.0, + hysteresis 0.3 = 3.3
+        # delta_t = 4.0 > 3.3, previous = "primary"
+        result = evaluate_heat_sources(room, MODE_HEATING, 0.8, 17.0, 21.0, -5.0, "primary", hass)
+
+        assert isinstance(result, HeatSourcePlan)
+        assert result.active_sources == "both"
+
+    def test_both_drops_to_primary_in_cold_weather(self):
+        """When on 'both' and gap drops below threshold in cold weather, prefer boiler."""
+        hass = _make_hass(["heat", "cool"])
+        room = _make_room(primary_delta=1.5, outdoor_threshold=5.0)
+        # delta_t = 1.0 < primary_delta - hysteresis (1.2), outdoor = 0°C (cold)
+        result = evaluate_heat_sources(room, MODE_HEATING, 0.6, 20.0, 21.0, 0.0, "both", hass)
+
+        assert isinstance(result, HeatSourcePlan)
+        assert result.active_sources == "primary"

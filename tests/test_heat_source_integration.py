@@ -171,8 +171,8 @@ class TestHeatSourceIntegration:
     async def test_small_gap_only_ac_receives_commands(self, coordinator, real_store, hass):
         """Small gap (0.5C): only secondary (AC) should actively heat.
 
-        TRV stays in heat mode at effective_target (low setpoint) to avoid
-        boiler short-cycling, but is NOT actively heating.
+        TRV stays in heat mode at current_temp to keep valve closed
+        while AC handles heating.
         """
         await _setup_store(real_store)
 
@@ -184,16 +184,16 @@ class TestHeatSourceIntegration:
         trv_calls = _calls_for_entity(hass, "climate.trv_living")
         ac_calls = _calls_for_entity(hass, "climate.ac_living")
 
-        # TRV: should be in heat mode but at low (effective_target) setpoint
+        # TRV: should be in heat mode but at current_temp (valve closed)
         trv_modes = [svc for svc, _ in trv_calls if svc == "set_hvac_mode"]
         assert len(trv_modes) > 0, "TRV should receive hvac_mode command"
         trv_mode_data = [d for svc, d in trv_calls if svc == "set_hvac_mode"]
         assert trv_mode_data[0]["hvac_mode"] == "heat"
 
-        # TRV temperature should be effective_target (21.0), NOT boost
+        # TRV temperature should be current_temp (20.5) to keep valve closed
         trv_temp_calls = [d for svc, d in trv_calls if svc == "set_temperature"]
         assert len(trv_temp_calls) > 0
-        assert trv_temp_calls[0]["temperature"] == 21.0
+        assert trv_temp_calls[0]["temperature"] == 20.5
 
         # AC: should receive active heat commands
         ac_modes = [d for svc, d in ac_calls if svc == "set_hvac_mode"]

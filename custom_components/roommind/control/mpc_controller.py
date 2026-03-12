@@ -821,8 +821,12 @@ class MPCController:
                 else:
                     # Inactive device
                     if cmd.device_type == "thermostat":
-                        # Keep TRV in heat mode at low setpoint to avoid boiler short-cycling
-                        ha_t = celsius_to_ha_temp(self.hass, effective_target)
+                        # Keep TRV in heat mode at current temp to keep valve closed
+                        # while the preferred source handles heating.
+                        # current_temp is guaranteed non-None here: the orchestrator
+                        # returns None when current_temp is None (line 100).
+                        assert current_temp is not None
+                        ha_t = celsius_to_ha_temp(self.hass, current_temp)
                         await self._call("set_hvac_mode", {"entity_id": cmd.entity_id, "hvac_mode": "heat"})
                         await self._call(
                             "set_temperature",

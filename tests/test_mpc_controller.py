@@ -4537,7 +4537,7 @@ async def test_heat_source_plan_active_trv_inactive_ac():
 
 @pytest.mark.asyncio
 async def test_heat_source_plan_active_ac_inactive_trv():
-    """Active AC gets heat + proportional temp, inactive TRV gets heat + effective_target."""
+    """Active AC gets heat + proportional temp, inactive TRV gets heat + current_temp (valve closed)."""
     from custom_components.roommind.managers.heat_source_orchestrator import DeviceCommand, HeatSourcePlan
 
     _last_commands.clear()
@@ -4599,14 +4599,14 @@ async def test_heat_source_plan_active_ac_inactive_trv():
 
     calls = hass.services.async_call.call_args_list
 
-    # Inactive TRV: heat mode + effective_target (21.0)
+    # Inactive TRV: heat mode + current_temp (19.0) to keep valve closed
     trv_mode = [c for c in calls if c[0][1] == "set_hvac_mode" and c[0][2]["entity_id"] == "climate.trv1"]
     assert len(trv_mode) == 1
     assert trv_mode[0][0][2]["hvac_mode"] == "heat"
 
     trv_temp = [c for c in calls if c[0][1] == "set_temperature" and c[0][2]["entity_id"] == "climate.trv1"]
     assert len(trv_temp) == 1
-    assert trv_temp[0][0][2]["temperature"] == 21.0
+    assert trv_temp[0][0][2]["temperature"] == 19.0
 
     # Active AC: heat mode + proportional temp
     ac_mode = [c for c in calls if c[0][1] == "set_hvac_mode" and c[0][2]["entity_id"] == "climate.ac1"]

@@ -161,31 +161,24 @@ def evaluate_heat_sources(
     # Determine which source group to activate
     large_gap_threshold = primary_delta * HEAT_SOURCE_LARGE_GAP_MULTIPLIER
 
-    # Apply hysteresis to prevent oscillation
-    if previous_active_sources == "both":
-        # Stay on "both" until delta drops well below primary_delta
-        if delta_t > primary_delta - HEAT_SOURCE_HYSTERESIS:
-            active = "both"
-        else:
-            active = "secondary"
-    elif previous_active_sources == "primary":
-        # Stay on primary unless delta drops below primary threshold
-        if delta_t > primary_delta - HEAT_SOURCE_HYSTERESIS:
-            active = "primary"
-        else:
-            active = "secondary"
+    # Weather-based preference (None when no outdoor data available)
+    if outdoor_temp is not None:
+        prefer_ac: bool | None = outdoor_temp > outdoor_threshold
     else:
-        # From secondary or none: need to cross threshold + hysteresis to escalate
-        if delta_t >= large_gap_threshold + HEAT_SOURCE_HYSTERESIS:
-            active = "both"
-        elif delta_t >= primary_delta + HEAT_SOURCE_HYSTERESIS:
-            # Medium gap: weather decides preference
-            if outdoor_temp is not None and outdoor_temp > outdoor_threshold:
-                active = "secondary"  # Mild weather: AC is more efficient
-            else:
-                active = "primary"  # Cold weather: boiler is more effective
-        else:
-            active = "secondary"
+        prefer_ac = None
+
+    # "both" when gap is large, or hysteresis holds "both" state
+    if delta_t >= large_gap_threshold + HEAT_SOURCE_HYSTERESIS:
+        active = "both"
+    elif previous_active_sources == "both" and delta_t > primary_delta - HEAT_SOURCE_HYSTERESIS:
+        active = "both"
+    elif prefer_ac is True:
+        active = "secondary"
+    elif prefer_ac is False:
+        active = "primary"
+    else:
+        # No outdoor data: delta-T heuristic (backward compatible)
+        active = "primary" if delta_t >= primary_delta + HEAT_SOURCE_HYSTERESIS else "secondary"
 
     # Edge case: if chosen group has no devices, fall back
     if active == "secondary" and not secondary_devices:
@@ -206,12 +199,12 @@ def evaluate_heat_sources(
     if ac_disabled and active != "none":
         reason_parts.append(f"AC disabled (outdoor {outdoor_temp}°C < {ac_min_outdoor}°C)")
 
-    if active == "secondary":
-        reason_parts.append(f"small gap ({delta_t:.1f}°C)")
-    elif active == "primary":
-        reason_parts.append(f"medium gap ({delta_t:.1f}°C), cold weather")
-    elif active == "both":
+    if active == "both":
         reason_parts.append(f"large gap ({delta_t:.1f}°C)")
+    elif active == "primary":
+        reason_parts.append(f"boiler preferred ({delta_t:.1f}°C gap, outdoor {outdoor_temp}°C)")
+    elif active == "secondary":
+        reason_parts.append(f"AC preferred ({delta_t:.1f}°C gap, outdoor {outdoor_temp}°C)")
 
     for eid, device_type in primary_devices:
         is_active = active in ("primary", "both")
