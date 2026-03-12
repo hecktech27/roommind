@@ -607,7 +607,14 @@ export class RoomMindPanel extends LitElement {
     const areas = Object.values(this.hass.areas);
 
     const infos: AreaInfo[] = areas.map((area) => {
-      const areaEntities = getEntitiesForArea(area.area_id, this.hass.entities, this.hass.devices);
+      const areaEntities = getEntitiesForArea(
+        area.area_id,
+        this.hass.entities,
+        this.hass.devices,
+      ).filter((e) => {
+        const idAfterDot = e.entity_id.substring(e.entity_id.indexOf(".") + 1);
+        return !idAfterDot.startsWith("roommind_");
+      });
 
       const climateEntityCount = areaEntities.filter((e) =>
         e.entity_id.startsWith("climate."),

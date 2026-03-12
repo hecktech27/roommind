@@ -452,11 +452,15 @@ export class RsDeviceSection extends LitElement {
 
   private _renderEditMode() {
     // Fetch all area entities once, then filter by category
+    // Exclude RoomMind's own entities to prevent self-assignment (#86)
     const allAreaEntities = getEntitiesForArea(
       this.area.area_id,
       this.hass?.entities,
       this.hass?.devices,
-    );
+    ).filter((e) => {
+      const idAfterDot = e.entity_id.substring(e.entity_id.indexOf(".") + 1);
+      return !idAfterDot.startsWith("roommind_");
+    });
 
     const areaClimateEntities = allAreaEntities.filter((e) => e.entity_id.startsWith("climate."));
 
