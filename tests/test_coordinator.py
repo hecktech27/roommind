@@ -14,6 +14,7 @@ SAMPLE_ROOM = {
     "area_id": "living_room_abc12345",
     "thermostats": ["climate.living_room"],
     "acs": [],
+    "devices": [{"entity_id": "climate.living_room", "type": "trv", "role": "auto", "heating_system_type": ""}],
     "temperature_sensor": "sensor.living_room_temp",
     "humidity_sensor": "sensor.living_room_humidity",
     "climate_mode": "auto",
@@ -341,6 +342,7 @@ class TestRoomMindCoordinator:
             "area_id": "bedroom_abc12345",
             "thermostats": ["climate.bedroom"],
             "acs": [],
+            "devices": [{"entity_id": "climate.bedroom", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "temperature_sensor": "sensor.bedroom_temp",
             "climate_mode": "auto",
             "schedules": [],
@@ -2001,6 +2003,10 @@ class TestValveProtection:
         room_with_ac = {
             **SAMPLE_ROOM,
             "acs": ["climate.living_room_ac"],
+            "devices": [
+                {"entity_id": "climate.living_room", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.living_room_ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
         }
         store = _make_store_mock({"living_room_abc12345": room_with_ac})
         store.get_settings.return_value = {
@@ -2677,6 +2683,10 @@ class TestClimateControlDisabled:
             **SAMPLE_ROOM,
             "thermostats": [],
             "acs": ["climate.living_room_ac"],
+            "devices": [
+                {"entity_id": "climate.living_room", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.living_room_ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
             "climate_mode": "cool_only",
         }
         store = _make_store_mock({"living_room_abc12345": room_with_ac})
@@ -2713,6 +2723,10 @@ class TestClimateControlDisabled:
             **SAMPLE_ROOM,
             "thermostats": ["climate.living_room"],
             "acs": ["climate.living_room_ac"],
+            "devices": [
+                {"entity_id": "climate.living_room", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.living_room_ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
         }
         store = _make_store_mock({"living_room_abc12345": room_both})
         store.get_settings.return_value = {"climate_control_active": False}
@@ -2976,7 +2990,11 @@ class TestReadDeviceTemp:
         state.attributes = {"current_temperature": 21.5}
         hass.states.get = MagicMock(return_value=state)
 
-        room = {"thermostats": ["climate.trv1"], "acs": []}
+        room = {
+            "thermostats": ["climate.trv1"],
+            "acs": [],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
         assert coordinator._read_device_temp(room) == 21.5
 
     def test_reads_from_ac_when_no_thermostat(self, hass, mock_config_entry):
@@ -2985,18 +3003,26 @@ class TestReadDeviceTemp:
         state.attributes = {"current_temperature": 25.0}
         hass.states.get = MagicMock(return_value=state)
 
-        room = {"thermostats": [], "acs": ["climate.ac1"]}
+        room = {
+            "thermostats": [],
+            "acs": ["climate.ac1"],
+            "devices": [{"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""}],
+        }
         assert coordinator._read_device_temp(room) == 25.0
 
     def test_no_devices(self, hass, mock_config_entry):
         coordinator = _create_coordinator(hass, mock_config_entry)
-        room = {"thermostats": [], "acs": []}
+        room = {"thermostats": [], "acs": [], "devices": []}
         assert coordinator._read_device_temp(room) is None
 
     def test_state_is_none(self, hass, mock_config_entry):
         coordinator = _create_coordinator(hass, mock_config_entry)
         hass.states.get = MagicMock(return_value=None)
-        room = {"thermostats": ["climate.trv1"], "acs": []}
+        room = {
+            "thermostats": ["climate.trv1"],
+            "acs": [],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
         assert coordinator._read_device_temp(room) is None
 
     def test_invalid_temperature_value(self, hass, mock_config_entry):
@@ -3005,7 +3031,11 @@ class TestReadDeviceTemp:
         state.attributes = {"current_temperature": "unknown"}
         hass.states.get = MagicMock(return_value=state)
 
-        room = {"thermostats": ["climate.trv1"], "acs": []}
+        room = {
+            "thermostats": ["climate.trv1"],
+            "acs": [],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
         assert coordinator._read_device_temp(room) is None
 
     def test_no_current_temp_attribute(self, hass, mock_config_entry):
@@ -3014,7 +3044,11 @@ class TestReadDeviceTemp:
         state.attributes = {"temperature": 21.0}  # different key
         hass.states.get = MagicMock(return_value=state)
 
-        room = {"thermostats": ["climate.trv1"], "acs": []}
+        room = {
+            "thermostats": ["climate.trv1"],
+            "acs": [],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
         assert coordinator._read_device_temp(room) is None
 
 
@@ -3169,7 +3203,12 @@ class TestValveProtectionCheck:
         eid_state.attributes = {"max_temp": 30}
         hass.states.get = MagicMock(return_value=eid_state)
 
-        rooms = {"room_a": {"thermostats": ["climate.trv1"]}}
+        rooms = {
+            "room_a": {
+                "thermostats": ["climate.trv1"],
+                "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+            }
+        }
         settings = {"valve_protection_enabled": True, "valve_protection_interval_days": 7}
 
         # Valve was last actuated > 7 days ago
@@ -3185,7 +3224,12 @@ class TestValveProtectionCheck:
         coordinator = _create_coordinator(hass, mock_config_entry)
         hass.services.async_call = AsyncMock()
 
-        rooms = {"room_a": {"thermostats": ["climate.trv1"]}}
+        rooms = {
+            "room_a": {
+                "thermostats": ["climate.trv1"],
+                "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+            }
+        }
         settings = {"valve_protection_enabled": True, "valve_protection_interval_days": 7}
 
         # Already cycling
@@ -3204,7 +3248,12 @@ class TestValveProtectionCheck:
 
         # Entity in actuation dict but not in any room
         coordinator._valve_manager._last_actuation["climate.old_trv"] = time.time()
-        rooms = {"room_a": {"thermostats": ["climate.trv1"]}}
+        rooms = {
+            "room_a": {
+                "thermostats": ["climate.trv1"],
+                "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+            }
+        }
         settings = {"valve_protection_enabled": True, "valve_protection_interval_days": 7}
 
         await coordinator._valve_manager.async_check_and_cycle(rooms, settings)
@@ -3957,7 +4006,13 @@ class TestCoverageGaps:
         }
         hass.states.get = MagicMock(return_value=device_state)
 
-        result = coordinator._infer_device_mode({"thermostats": ["climate.trv1"], "acs": []})
+        result = coordinator._infer_device_mode(
+            {
+                "thermostats": ["climate.trv1"],
+                "acs": [],
+                "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+            }
+        )
         assert result == "idle"
 
     @pytest.mark.asyncio
@@ -3973,7 +4028,13 @@ class TestCoverageGaps:
         }
         hass.states.get = MagicMock(return_value=device_state)
 
-        result = coordinator._infer_device_mode({"thermostats": [], "acs": ["climate.ac1"]})
+        result = coordinator._infer_device_mode(
+            {
+                "thermostats": [],
+                "acs": ["climate.ac1"],
+                "devices": [{"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""}],
+            }
+        )
         assert result == "idle"
 
     @pytest.mark.asyncio
@@ -3989,7 +4050,13 @@ class TestCoverageGaps:
         }
         hass.states.get = MagicMock(return_value=device_state)
 
-        result = coordinator._infer_device_mode({"thermostats": [], "acs": ["climate.ac1"]})
+        result = coordinator._infer_device_mode(
+            {
+                "thermostats": [],
+                "acs": ["climate.ac1"],
+                "devices": [{"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""}],
+            }
+        )
         assert result == "cooling"
 
     @pytest.mark.asyncio
@@ -4010,7 +4077,14 @@ class TestCoverageGaps:
         hass.states.get = MagicMock(side_effect=mock_get)
 
         result_mode, result_pf = coordinator._observe_device_action(
-            {"thermostats": ["climate.trv1"], "acs": ["climate.ac1"]}
+            {
+                "thermostats": ["climate.trv1"],
+                "acs": ["climate.ac1"],
+                "devices": [
+                    {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""},
+                    {"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""},
+                ],
+            }
         )
         assert result_mode is None
         assert result_pf == 0.0
@@ -4702,7 +4776,14 @@ class TestCoverageGaps:
 
         hass.states.get = states_get
 
-        room = {"thermostats": ["climate.therm1", "climate.therm2"], "acs": []}
+        room = {
+            "thermostats": ["climate.therm1", "climate.therm2"],
+            "acs": [],
+            "devices": [
+                {"entity_id": "climate.therm1", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.therm2", "type": "trv", "role": "auto", "heating_system_type": ""},
+            ],
+        }
         mode, pf = coordinator._observe_device_action(room)
         assert mode is None
         assert pf == 0.0
@@ -4982,6 +5063,7 @@ class TestManagedModeDisplay:
             **MANAGED_ROOM,
             "thermostats": [],
             "acs": ["climate.living_room"],
+            "devices": [{"entity_id": "climate.living_room", "type": "ac", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "cool_only",
         }
         store = _make_store_mock({"living_room_abc12345": managed_cool_room})
@@ -5019,6 +5101,10 @@ class TestHeatSourceOrchestration:
         "area_id": "living_room_abc12345",
         "thermostats": ["climate.living_room"],
         "acs": ["climate.living_room_ac"],
+        "devices": [
+            {"entity_id": "climate.living_room", "type": "trv", "role": "auto", "heating_system_type": ""},
+            {"entity_id": "climate.living_room_ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+        ],
         "temperature_sensor": "sensor.living_room_temp",
         "humidity_sensor": "sensor.living_room_humidity",
         "climate_mode": "auto",

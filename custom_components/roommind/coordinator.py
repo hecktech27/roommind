@@ -51,6 +51,7 @@ from .managers.residual_heat_tracker import ResidualHeatTracker
 from .managers.valve_manager import ValveManager
 from .managers.weather_manager import WeatherManager
 from .managers.window_manager import WindowManager
+from .utils.device_utils import get_ac_eids, get_all_entity_ids, get_trv_eids
 from .utils.history_store import HistoryStore
 from .utils.schedule_utils import resolve_schedule_index
 from .utils.sensor_utils import read_sensor_value
@@ -500,7 +501,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         # Read device temperature limits for dynamic boost targets
         trv_max_temps: list[float] = []
-        for eid in room.get("thermostats", []):
+        for eid in get_trv_eids(room.get("devices", [])):
             st = self.hass.states.get(eid)
             if st and st.attributes.get("max_temp") is not None:
                 trv_max_temps.append(st.attributes["max_temp"])
@@ -508,7 +509,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         ac_min_temps: list[float] = []
         ac_max_temps: list[float] = []
-        for eid in room.get("acs", []):
+        for eid in get_ac_eids(room.get("devices", [])):
             st = self.hass.states.get(eid)
             if st:
                 if st.attributes.get("min_temp") is not None:
@@ -519,7 +520,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         ac_device_max_temp = min(ac_max_temps) if ac_max_temps else None
 
         # Exclude TRVs currently being valve-protection-cycled from normal control
-        cycling_eids = {eid for eid in room.get("thermostats", []) if eid in self._valve_manager._cycling}
+        cycling_eids = {eid for eid in get_trv_eids(room.get("devices", [])) if eid in self._valve_manager._cycling}
 
         # Heat source orchestration: smart routing for rooms with both TRVs and ACs
         heat_source_plan = None
@@ -527,8 +528,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             room.get("heat_source_orchestration", False)
             and mode == MODE_HEATING
             and has_external_sensor
-            and room.get("thermostats")
-            and room.get("acs")
+            and get_trv_eids(room.get("devices", []))
+            and get_ac_eids(room.get("devices", []))
         ):
             heat_source_plan = evaluate_heat_sources(
                 room_config=room,
@@ -619,7 +620,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         # Track valve actuation during normal heating (skip excluded entities)
         if mode == MODE_HEATING:
             excluded = set(room.get("valve_protection_exclude", []))
-            heating_eids = [eid for eid in room.get("thermostats", []) if eid not in excluded]
+            heating_eids = [eid for eid in get_trv_eids(room.get("devices", [])) if eid not in excluded]
             self._valve_manager.record_heating(heating_eids)
 
         # Determine mode for EKF training: use observed device state when
@@ -727,8 +728,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 has_external_sensor,
                 device_max_temp=device_max_temp,
                 device_min_temp=device_min_temp,
-                has_thermostats=bool(room.get("thermostats")),
-                has_acs=bool(room.get("acs")),
+                has_thermostats=bool(get_trv_eids(room.get("devices", []))),
+                has_acs=bool(get_ac_eids(room.get("devices", []))),
             ),
             "window_open": window_open,
             **build_override_live(room),
@@ -813,7 +814,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
     def _read_device_temp(self, room: dict) -> float | None:
         """Read current_temperature from the first thermostat or AC entity."""
-        for entity_id in room.get("thermostats", []) + room.get("acs", []):
+        for entity_id in get_all_entity_ids(room.get("devices", [])):
             state = self.hass.states.get(entity_id)
             if state and state.attributes.get("current_temperature") is not None:
                 try:
@@ -835,7 +836,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         """
         dominated: str | None = None
 
-        for eid in room.get("thermostats", []) + room.get("acs", []):
+        for eid in get_all_entity_ids(room.get("devices", [])):
             state = self.hass.states.get(eid)
             if state is None or state.state in ("unavailable", "unknown"):
                 continue
@@ -879,7 +880,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         Used to distinguish 'missing attribute' from other reasons
         _observe_device_action returns None (conflicts, unavailable, etc.).
         """
-        for eid in room.get("thermostats", []) + room.get("acs", []):
+        for eid in get_all_entity_ids(room.get("devices", [])):
             state = self.hass.states.get(eid)
             if state is None or state.state in ("unavailable", "unknown", "off"):
                 continue
@@ -895,7 +896,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         Used for display and as a fallback for EKF training when hvac_action
         is missing (Managed Mode and learn-only mode).  See #69.
         """
-        for eid in room.get("thermostats", []) + room.get("acs", []):
+        for eid in get_all_entity_ids(room.get("devices", [])):
             state = self.hass.states.get(eid)
             if state is None or state.state in ("unavailable", "unknown", "off"):
                 continue

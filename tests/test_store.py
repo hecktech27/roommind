@@ -50,6 +50,10 @@ async def test_save_room_with_all_fields(store):
         {
             "thermostats": ["climate.sz_trv"],
             "acs": ["climate.sz_ac"],
+            "devices": [
+                {"entity_id": "climate.sz_trv", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.sz_ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
             "temperature_sensor": "sensor.sz_temp",
             "humidity_sensor": "sensor.sz_humidity",
             "climate_mode": "heat_only",
@@ -160,6 +164,7 @@ async def test_load_restores_data(store):
                 "area_id": "wohnzimmer",
                 "thermostats": ["climate.wz_trv"],
                 "acs": [],
+                "devices": [{"entity_id": "climate.wz_trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
                 "temperature_sensor": "sensor.wz_temp",
                 "climate_mode": "auto",
                 "schedules": [{"entity_id": "schedule.wz_heating"}],
@@ -546,6 +551,10 @@ async def test_save_room_with_legacy_syncs_devices(store):
         {
             "thermostats": ["climate.trv1"],
             "acs": ["climate.ac1"],
+            "devices": [
+                {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": "radiator"},
+                {"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
             "heating_system_type": "radiator",
         },
     )
@@ -591,6 +600,11 @@ async def test_update_existing_with_legacy_syncs_devices(store):
         {
             "thermostats": ["climate.trv1", "climate.trv2"],
             "acs": ["climate.ac1"],
+            "devices": [
+                {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.trv2", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
         },
     )
     assert len(updated["devices"]) == 3

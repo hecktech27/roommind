@@ -208,6 +208,7 @@ class TestSimulateMPC:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         settings = {"comfort_weight": 70}
@@ -230,6 +231,7 @@ class TestSimulateMPC:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         settings = {"comfort_weight": 70}
@@ -253,6 +255,7 @@ class TestSimulateMPC:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         settings = {"comfort_weight": 70}
@@ -275,6 +278,7 @@ class TestSimulateMPC:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         settings = {}
@@ -296,6 +300,7 @@ class TestSimulateMPC:
         room_config = {
             "thermostats": [],
             "acs": [],
+            "devices": [],
             "climate_mode": "auto",
         }
         settings = {}
@@ -327,6 +332,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         all_points: list[dict] = []
@@ -350,6 +356,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         all_points: list[dict] = []
@@ -373,6 +380,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": [],
             "acs": ["climate.ac"],
+            "devices": [{"entity_id": "climate.ac", "type": "ac", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         all_points: list[dict] = []
@@ -395,6 +403,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": [],
             "acs": [],
+            "devices": [],
             "climate_mode": "auto",
         }
         # Create idle rate observations (slow drift)
@@ -432,6 +441,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         result = _simulate_bangbang(
@@ -453,6 +463,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": [],
             "acs": [],
+            "devices": [],
             "climate_mode": "auto",
         }
         result_with_solar = _simulate_bangbang(
@@ -484,6 +495,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         result = _simulate_bangbang(
@@ -508,6 +520,10 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": ["climate.ac"],
+            "devices": [
+                {"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
             "climate_mode": "auto",
         }
         result = _simulate_bangbang(
@@ -530,6 +546,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": [],
             "acs": [],
+            "devices": [],
             "climate_mode": "auto",
         }
         now = time.time()
@@ -565,6 +582,7 @@ class TestSimulateBangbang:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         # With residual heat from underfloor heating
@@ -629,6 +647,7 @@ class TestSimulatePrediction:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         result = simulate_prediction(
@@ -654,6 +673,7 @@ class TestSimulatePrediction:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         result = simulate_prediction(
@@ -720,6 +740,10 @@ class TestSimulateMPCEdgeCases:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": ["climate.ac"],
+            "devices": [
+                {"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.ac", "type": "ac", "role": "auto", "heating_system_type": ""},
+            ],
             "climate_mode": "auto",
         }
         result = _simulate_mpc(
@@ -743,6 +767,7 @@ class TestSimulateMPCEdgeCases:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         # With underfloor min_run, heating continues even if temp exceeds target
@@ -765,6 +790,7 @@ class TestSimulateMPCEdgeCases:
         room_config = {
             "thermostats": [],
             "acs": ["climate.ac"],
+            "devices": [{"entity_id": "climate.ac", "type": "ac", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         result = _simulate_mpc(
@@ -787,6 +813,7 @@ class TestSimulateMPCEdgeCases:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         result = _simulate_mpc(
@@ -811,6 +838,7 @@ class TestSimulateMPCEdgeCases:
         room_config = {
             "thermostats": ["climate.trv"],
             "acs": [],
+            "devices": [{"entity_id": "climate.trv", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "climate_mode": "auto",
         }
         # Start at target to force optimizer path (not stickiness)

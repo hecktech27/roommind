@@ -25,6 +25,7 @@ from ..const import (
     MODE_IDLE,
     TargetTemps,
 )
+from ..utils.device_utils import get_ac_eids, get_trv_eids
 from ..utils.temp_utils import celsius_to_ha_temp
 from .mpc_optimizer import MPCOptimizer, MPCPlan
 from .residual_heat import get_min_run_blocks
@@ -206,7 +207,7 @@ MIN_ACTIVE_UPDATES = 20  # ~1 h of heating or cooling data
 
 def check_acs_can_heat(hass: HomeAssistant, room_config: dict) -> bool:
     """Check if any AC entity in the room supports heating."""
-    for eid in room_config.get("acs", []):
+    for eid in get_ac_eids(room_config.get("devices", [])):
         state = hass.states.get(eid)
         if state is None:
             continue
@@ -233,8 +234,10 @@ def get_can_heat_cool(
     contribute to the heating capability of the room.
     """
     climate_mode = room_config.get("climate_mode", "auto")
-    can_heat = climate_mode != CLIMATE_MODE_COOL_ONLY and (bool(room_config.get("thermostats")) or acs_can_heat)
-    can_cool = climate_mode != CLIMATE_MODE_HEAT_ONLY and bool(room_config.get("acs"))
+    can_heat = climate_mode != CLIMATE_MODE_COOL_ONLY and (
+        bool(get_trv_eids(room_config.get("devices", []))) or acs_can_heat
+    )
+    can_cool = climate_mode != CLIMATE_MODE_HEAT_ONLY and bool(get_ac_eids(room_config.get("devices", [])))
 
     if outdoor_temp is not None:
         if outdoor_temp > outdoor_heating_max:
@@ -303,8 +306,8 @@ class MPCController:
     ) -> None:
         self.hass = hass
         self.room_config = room_config
-        self.thermostats: list[str] = room_config.get("thermostats", [])
-        self.acs: list[str] = room_config.get("acs", [])
+        self.thermostats: list[str] = get_trv_eids(room_config.get("devices", []))
+        self.acs: list[str] = get_ac_eids(room_config.get("devices", []))
         self.climate_mode: str = room_config.get("climate_mode", "auto")
         self.outdoor_temp = outdoor_temp
         self.outdoor_forecast = outdoor_forecast or []

@@ -39,6 +39,12 @@ def make_room(**overrides):
         "schedules": [],
     }
     room.update(overrides)
+    # Build devices from thermostats/acs for consistency
+    hst = room.get("heating_system_type", "")
+    room["devices"] = [
+        {"entity_id": eid, "type": "trv", "role": "auto", "heating_system_type": hst}
+        for eid in room.get("thermostats", [])
+    ] + [{"entity_id": eid, "type": "ac", "role": "auto", "heating_system_type": ""} for eid in room.get("acs", [])]
     return room
 
 
@@ -2944,7 +2950,16 @@ def test_acs_can_heat_auto_mode():
     state = MagicMock()
     state.attributes = {"hvac_modes": ["off", "auto"]}
     hass.states.get = MagicMock(return_value=state)
-    assert check_acs_can_heat(hass, {"acs": ["climate.ac1"]}) is True
+    assert (
+        check_acs_can_heat(
+            hass,
+            {
+                "acs": ["climate.ac1"],
+                "devices": [{"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""}],
+            },
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------

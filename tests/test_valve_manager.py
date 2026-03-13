@@ -102,7 +102,12 @@ async def test_check_and_cycle_exception_on_disable_close(vm):
 @pytest.mark.asyncio
 async def test_check_and_cycle_exception_starting_cycle(vm):
     """Exception during cycle start is caught; valve not added to cycling."""
-    rooms = {"living": {"thermostats": ["climate.trv1"]}}
+    rooms = {
+        "living": {
+            "thermostats": ["climate.trv1"],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
+    }
     settings = {
         "valve_protection_enabled": True,
         "valve_protection_interval_days": 0,  # always stale
@@ -128,7 +133,12 @@ async def test_check_and_cycle_exception_starting_cycle(vm):
 @pytest.mark.asyncio
 async def test_cycle_dual_setpoint_trv(vm):
     """TRV with target_temp_low uses dual-setpoint set_temperature call."""
-    rooms = {"living": {"thermostats": ["climate.trv1"]}}
+    rooms = {
+        "living": {
+            "thermostats": ["climate.trv1"],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
+    }
     settings = {
         "valve_protection_enabled": True,
         "valve_protection_interval_days": 0,
@@ -163,7 +173,12 @@ async def test_cycle_dual_setpoint_trv(vm):
 @pytest.mark.asyncio
 async def test_cycle_single_setpoint_trv_unchanged(vm):
     """Standard TRV without target_temp_low uses single-setpoint call."""
-    rooms = {"living": {"thermostats": ["climate.trv1"]}}
+    rooms = {
+        "living": {
+            "thermostats": ["climate.trv1"],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
+        }
+    }
     settings = {
         "valve_protection_enabled": True,
         "valve_protection_interval_days": 0,
@@ -201,6 +216,10 @@ async def test_excluded_entity_not_cycled(vm):
     rooms = {
         "living": {
             "thermostats": ["climate.trv1", "climate.boiler"],
+            "devices": [
+                {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.boiler", "type": "trv", "role": "auto", "heating_system_type": ""},
+            ],
             "valve_protection_exclude": ["climate.boiler"],
         }
     }
@@ -230,6 +249,10 @@ async def test_empty_exclude_cycles_all(vm):
     rooms = {
         "living": {
             "thermostats": ["climate.trv1", "climate.trv2"],
+            "devices": [
+                {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.trv2", "type": "trv", "role": "auto", "heating_system_type": ""},
+            ],
             "valve_protection_exclude": [],
         }
     }
@@ -259,6 +282,7 @@ async def test_exclude_nonexistent_entity_harmless(vm):
     rooms = {
         "living": {
             "thermostats": ["climate.trv1"],
+            "devices": [{"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""}],
             "valve_protection_exclude": ["climate.doesnt_exist"],
         }
     }
@@ -287,10 +311,18 @@ async def test_exclude_in_one_room_prevents_cycling_from_other(vm):
     rooms = {
         "living": {
             "thermostats": ["climate.boiler", "climate.trv1"],
+            "devices": [
+                {"entity_id": "climate.boiler", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""},
+            ],
             "valve_protection_exclude": ["climate.boiler"],
         },
         "bedroom": {
             "thermostats": ["climate.boiler", "climate.trv2"],
+            "devices": [
+                {"entity_id": "climate.boiler", "type": "trv", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.trv2", "type": "trv", "role": "auto", "heating_system_type": ""},
+            ],
             "valve_protection_exclude": [],
         },
     }

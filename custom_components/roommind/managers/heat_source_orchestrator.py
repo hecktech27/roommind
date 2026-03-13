@@ -27,6 +27,7 @@ from ..const import (
     HEAT_SOURCE_SECONDARY_POWER_SCALE,
     MODE_HEATING,
 )
+from ..utils.device_utils import get_ac_eids, get_trv_eids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,8 +93,8 @@ def evaluate_heat_sources(
     if not room_config.get("heat_source_orchestration", False):
         return None
 
-    thermostats = room_config.get("thermostats", [])
-    acs = room_config.get("acs", [])
+    thermostats = get_trv_eids(room_config.get("devices", []))
+    acs = get_ac_eids(room_config.get("devices", []))
     if not thermostats or not acs:
         return None
 
