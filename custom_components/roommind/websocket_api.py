@@ -319,6 +319,16 @@ async def websocket_save_room(
             )
             return
 
+    # Reject duplicate entity_ids in devices[]
+    device_eids = [d["entity_id"] for d in config.get("devices", [])]
+    if len(device_eids) != len(set(device_eids)):
+        connection.send_error(
+            msg["id"],
+            "duplicate_entity",
+            "devices[] contains duplicate entity_ids",
+        )
+        return
+
     if ("thermostats" in config or "acs" in config) and "devices" not in config:
         _LOGGER.warning(
             "Room save for '%s' uses legacy thermostats/acs fields without devices. "

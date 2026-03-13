@@ -1705,6 +1705,24 @@ async def test_save_room_rejects_own_entities(ws_hass, store, connection, field,
 
 
 @pytest.mark.asyncio
+async def test_save_room_devices_duplicate_entity_rejected(ws_hass, store, connection):
+    """Duplicate entity_ids in devices[] are rejected."""
+    await store.async_load()
+    msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "living_room",
+        "devices": [
+            {"entity_id": "climate.trv1", "type": "trv"},
+            {"entity_id": "climate.trv1", "type": "ac"},
+        ],
+    }
+    await _save_room(ws_hass, connection, msg)
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args[0][1] == "duplicate_entity"
+
+
+@pytest.mark.asyncio
 async def test_save_room_allows_normal_entities(ws_hass, store, connection):
     """Normal (non-RoomMind) entities are accepted."""
     await store.async_load()

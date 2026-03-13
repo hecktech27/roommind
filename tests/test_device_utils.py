@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from custom_components.roommind.utils.device_utils import (
-    VALID_DEVICE_ROLES,
     VALID_DEVICE_TYPES,
     VALID_HEATING_SYSTEM_TYPES,
     devices_to_legacy,
@@ -28,8 +27,10 @@ def test_valid_device_types():
     assert VALID_DEVICE_TYPES == {"trv", "ac", "heat_pump"}
 
 
-def test_valid_device_roles():
-    assert VALID_DEVICE_ROLES == {"primary", "secondary", "auto"}
+def test_device_role_auto_constant():
+    from custom_components.roommind.utils.device_utils import DEVICE_ROLE_AUTO
+
+    assert DEVICE_ROLE_AUTO == "auto"
 
 
 def test_valid_heating_system_types():

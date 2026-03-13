@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing } from "lit";
+import { LitElement, html, css, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { HomeAssistant, HassArea, DeviceConfig, DeviceType } from "../types";
 import { getEntitiesForArea } from "../utils/room-state";
@@ -23,19 +23,22 @@ export class RsDeviceSection extends LitElement {
   @property({ type: Boolean }) public editing = false;
   @state() private _systemTypeInfoExpanded = false;
   @state() private _showBoostHint = false;
+  @state() private _selectedThermostats: Set<string> = new Set();
+  @state() private _selectedCoolingDevices: Set<string> = new Set();
+  @state() private _heatingSystemType = "";
 
-  private get _selectedThermostats(): Set<string> {
-    return new Set(this.devices.filter((d) => d.type === "trv").map((d) => d.entity_id));
-  }
-
-  private get _selectedCoolingDevices(): Set<string> {
-    return new Set(
-      this.devices.filter((d) => d.type === "ac" || d.type === "heat_pump").map((d) => d.entity_id),
-    );
-  }
-
-  private get _heatingSystemType(): string {
-    return resolveHeatingSystemType(this.devices);
+  protected willUpdate(changed: PropertyValues): void {
+    if (changed.has("devices")) {
+      this._selectedThermostats = new Set(
+        this.devices.filter((d) => d.type === "trv").map((d) => d.entity_id),
+      );
+      this._selectedCoolingDevices = new Set(
+        this.devices
+          .filter((d) => d.type === "ac" || d.type === "heat_pump")
+          .map((d) => d.entity_id),
+      );
+      this._heatingSystemType = resolveHeatingSystemType(this.devices);
+    }
   }
 
   static styles = css`

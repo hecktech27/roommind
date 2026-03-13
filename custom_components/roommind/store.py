@@ -73,14 +73,14 @@ class RoomMindStore:
         self._thermal_data = stored.get("thermal_data", {}) if stored else {}
 
         # One-time migration: Legacy -> Unified Device Model
-        needs_save = False
+        migrated = 0
         for room in self._data.values():
             if "devices" not in room:
                 ensure_room_has_devices(room)
-                needs_save = True
-        if needs_save:
+                migrated += 1
+        if migrated:
             await self._async_save()
-            _LOGGER.info("Migrated %d room(s) to unified device model", len(self._data))
+            _LOGGER.info("Migrated %d room(s) to unified device model", migrated)
 
     async def _async_save(self) -> None:
         """Persist current room data to the HA store."""
