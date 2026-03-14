@@ -798,7 +798,47 @@ class MPCController:
                 if cmd.entity_id in _exclude:
                     continue
                 if cmd.entity_id in _forced_on and not cmd.active:
-                    continue  # Compressor protection overrides orchestrator
+                    # Compressor protection: keep device running at target temp
+                    # to prevent overshoot (defensive — currently unreachable
+                    # because forced_on is only populated for IDLE mode).
+                    if targets.heat is not None:
+                        ha_t = celsius_to_ha_temp(self.hass, targets.heat)
+                        if cmd.device_type == "thermostat":
+                            await self._call(
+                                "set_hvac_mode",
+                                {"entity_id": cmd.entity_id, "hvac_mode": "heat"},
+                            )
+                            await self._call(
+                                "set_temperature",
+                                {"entity_id": cmd.entity_id, "temperature": ha_t},
+                                temp_intent="heat",
+                            )
+                        else:
+                            ac_state = self.hass.states.get(cmd.entity_id)
+                            ac_modes = (ac_state.attributes.get("hvac_modes") or []) if ac_state else []
+                            if "heat" in ac_modes:
+                                await self._call(
+                                    "set_hvac_mode",
+                                    {"entity_id": cmd.entity_id, "hvac_mode": "heat"},
+                                )
+                            elif "heat_cool" in ac_modes:
+                                await self._call(
+                                    "set_hvac_mode",
+                                    {"entity_id": cmd.entity_id, "hvac_mode": "heat_cool"},
+                                )
+                            elif "auto" in ac_modes:
+                                await self._call(
+                                    "set_hvac_mode",
+                                    {"entity_id": cmd.entity_id, "hvac_mode": "auto"},
+                                )
+                            else:
+                                continue
+                            await self._call(
+                                "set_temperature",
+                                {"entity_id": cmd.entity_id, "temperature": ha_t},
+                                temp_intent="heat",
+                            )
+                    continue
                 if cmd.entity_id in _forced_off and cmd.active:
                     await async_turn_off_climate(self.hass, cmd.entity_id, area_id=self._area_id)
                     continue
@@ -955,6 +995,39 @@ class MPCController:
         elif mode == MODE_IDLE:
             for eid in thermostats + self.acs:
                 if eid in _forced_on:
+                    # Compressor min-run: set target temp so device self-regulates
+                    # instead of overshooting at the old boost setpoint.
+                    dev_state = self.hass.states.get(eid)
+                    current_hvac = dev_state.state if dev_state else None
+                    if current_hvac == "heat" and targets.heat is not None:
+                        ha_t = celsius_to_ha_temp(self.hass, targets.heat)
+                        await self._call(
+                            "set_temperature",
+                            {"entity_id": eid, "temperature": ha_t},
+                            temp_intent="heat",
+                        )
+                    elif current_hvac == "cool" and targets.cool is not None:
+                        ha_t = celsius_to_ha_temp(self.hass, targets.cool)
+                        await self._call(
+                            "set_temperature",
+                            {"entity_id": eid, "temperature": ha_t},
+                            temp_intent="cool",
+                        )
+                    elif current_hvac in ("heat_cool", "auto"):
+                        if targets.heat is not None:
+                            ha_t = celsius_to_ha_temp(self.hass, targets.heat)
+                            await self._call(
+                                "set_temperature",
+                                {"entity_id": eid, "temperature": ha_t},
+                                temp_intent="heat",
+                            )
+                        elif targets.cool is not None:
+                            ha_t = celsius_to_ha_temp(self.hass, targets.cool)
+                            await self._call(
+                                "set_temperature",
+                                {"entity_id": eid, "temperature": ha_t},
+                                temp_intent="cool",
+                            )
                     _LOGGER.debug(
                         "Area '%s': keeping '%s' active (compressor min-run protection)",
                         self._area_id,

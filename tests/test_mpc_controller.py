@@ -5147,8 +5147,13 @@ async def test_managed_mode_ac_only_heat_cool_correct_target():
 
 @pytest.mark.asyncio
 async def test_apply_idle_forced_on_keeps_device_active():
-    """In idle mode, forced_on prevents device from being turned off."""
+    """In idle mode, forced_on sets device to target temp instead of turning off."""
     hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {"hvac_modes": ["heat", "off"], "min_temp": 5.0}
+    hass.states.get = MagicMock(return_value=trv_state)
+
     room = make_room()
     ctrl = MPCController(
         hass,
@@ -5163,9 +5168,8 @@ async def test_apply_idle_forced_on_keeps_device_active():
         TargetTemps(heat=21.0, cool=24.0),
         compressor_forced_on={"climate.living_trv"},
     )
-    # async_turn_off_climate calls set_hvac_mode with off. Since the TRV is forced_on,
-    # no service call should be made at all (device stays active).
     calls = hass.services.async_call.call_args_list
+    # No turn-off call
     off_calls = [
         c
         for c in calls
@@ -5174,6 +5178,10 @@ async def test_apply_idle_forced_on_keeps_device_active():
         and c[0][2].get("hvac_mode") == "off"
     ]
     assert len(off_calls) == 0
+    # set_temperature called with heat target
+    temp_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.living_trv" and c[0][1] == "set_temperature"]
+    assert len(temp_calls) == 1
+    assert temp_calls[0][0][2]["temperature"] == 21.0
 
 
 @pytest.mark.asyncio
@@ -5286,7 +5294,7 @@ async def test_apply_orchestrated_forced_on_overrides_inactive():
 
     hass = build_hass()
     trv_state = MagicMock()
-    trv_state.state = "heat"
+    trv_state.state = "off"  # device was off, forced_on should activate it
     trv_state.attributes = {"hvac_modes": ["heat", "off"], "min_temp": 5.0}
     hass.states.get = MagicMock(return_value=trv_state)
 
@@ -5319,8 +5327,7 @@ async def test_apply_orchestrated_forced_on_overrides_inactive():
         heat_source_plan=plan,
         compressor_forced_on={"climate.living_trv"},
     )
-    # forced_on should cause the inactive command to be skipped (continue),
-    # meaning no turn-off call for this entity
+    # forced_on should set device to heat at target temp, not turn off
     calls = hass.services.async_call.call_args_list
     off_calls = [
         c
@@ -5330,6 +5337,18 @@ async def test_apply_orchestrated_forced_on_overrides_inactive():
         and c[0][2].get("hvac_mode") == "off"
     ]
     assert len(off_calls) == 0
+    # set_hvac_mode("heat") and set_temperature called
+    heat_calls = [
+        c
+        for c in calls
+        if c[0][2].get("entity_id") == "climate.living_trv"
+        and c[0][1] == "set_hvac_mode"
+        and c[0][2].get("hvac_mode") == "heat"
+    ]
+    assert len(heat_calls) == 1
+    temp_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.living_trv" and c[0][1] == "set_temperature"]
+    assert len(temp_calls) == 1
+    assert temp_calls[0][0][2]["temperature"] == 21.0
 
 
 @pytest.mark.asyncio
@@ -5422,3 +5441,254 @@ async def test_apply_forced_on_and_off_empty_sets_no_effect():
         and c[0][2].get("hvac_mode") == "heat"
     ]
     assert len(heat_calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_apply_idle_forced_on_cooling_ac():
+    """In idle mode, forced_on AC in cool mode gets cool target."""
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "cool"
+    ac_state.attributes = {"hvac_modes": ["cool", "heat", "off"], "min_temp": 16.0}
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"])
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=30.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply(
+        "idle",
+        TargetTemps(heat=21.0, cool=24.0),
+        compressor_forced_on={"climate.ac"},
+    )
+    calls = hass.services.async_call.call_args_list
+    # set_temperature called with cool target
+    temp_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.ac" and c[0][1] == "set_temperature"]
+    assert len(temp_calls) == 1
+    assert temp_calls[0][0][2]["temperature"] == 24.0
+    # No hvac_mode change (device already in cool mode)
+    mode_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.ac" and c[0][1] == "set_hvac_mode"]
+    assert len(mode_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_idle_forced_on_heat_cool_device():
+    """In idle mode, forced_on device in heat_cool gets heat target via temp_intent."""
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "heat_cool"
+    ac_state.attributes = {
+        "hvac_modes": ["heat_cool", "off"],
+        "min_temp": 16.0,
+        "target_temp_low": 18.0,
+        "target_temp_high": 26.0,
+    }
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"])
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=20.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply(
+        "idle",
+        TargetTemps(heat=21.0, cool=24.0),
+        compressor_forced_on={"climate.ac"},
+    )
+    calls = hass.services.async_call.call_args_list
+    # set_temperature called with heat target (dual-setpoint handled by _call)
+    temp_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.ac" and c[0][1] == "set_temperature"]
+    assert len(temp_calls) == 1
+    # _call converts to target_temp_low/high for dual-setpoint devices
+    assert temp_calls[0][0][2].get("target_temp_low") == 21.0
+
+
+@pytest.mark.asyncio
+async def test_apply_idle_forced_on_no_target():
+    """Forced_on device with no matching target does nothing (no crash)."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {"hvac_modes": ["heat", "off"], "min_temp": 5.0}
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply(
+        "idle",
+        TargetTemps(heat=None, cool=None),
+        compressor_forced_on={"climate.living_trv"},
+    )
+    calls = hass.services.async_call.call_args_list
+    # No service calls for the forced_on device (no target available)
+    trv_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.living_trv"]
+    assert len(trv_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_orchestrated_forced_on_ac():
+    """Orchestrated forced_on AC gets heat mode + heat target."""
+    from custom_components.roommind.managers.heat_source_orchestrator import (
+        DeviceCommand,
+        HeatSourcePlan,
+    )
+
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "off"  # device was off, forced_on should activate it
+    ac_state.attributes = {"hvac_modes": ["heat", "cool", "off"], "min_temp": 16.0}
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"])
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={"heat_source_orchestration": True},
+        has_external_sensor=True,
+    )
+    plan = HeatSourcePlan(
+        commands=[
+            DeviceCommand(
+                entity_id="climate.ac",
+                role="primary",
+                device_type="ac",
+                active=False,
+                power_fraction=0.0,
+                reason="test",
+            ),
+        ],
+        active_sources="none",
+        reason="test",
+    )
+    await ctrl.async_apply(
+        "heating",
+        TargetTemps(heat=21.0, cool=24.0),
+        heat_source_plan=plan,
+        compressor_forced_on={"climate.ac"},
+    )
+    calls = hass.services.async_call.call_args_list
+    heat_calls = [
+        c
+        for c in calls
+        if c[0][2].get("entity_id") == "climate.ac"
+        and c[0][1] == "set_hvac_mode"
+        and c[0][2].get("hvac_mode") == "heat"
+    ]
+    assert len(heat_calls) == 1
+    temp_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.ac" and c[0][1] == "set_temperature"]
+    assert len(temp_calls) == 1
+    assert temp_calls[0][0][2]["temperature"] == 21.0
+
+
+@pytest.mark.asyncio
+async def test_apply_idle_forced_on_device_state_none():
+    """Forced_on device with unavailable state (None) does nothing."""
+    hass = build_hass()
+    # build_hass default: hass.states.get returns None
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply(
+        "idle",
+        TargetTemps(heat=21.0, cool=24.0),
+        compressor_forced_on={"climate.living_trv"},
+    )
+    calls = hass.services.async_call.call_args_list
+    trv_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.living_trv"]
+    assert len(trv_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_idle_forced_on_heat_cool_no_targets():
+    """Forced_on device in heat_cool with no targets does nothing."""
+    hass = build_hass()
+    ac_state = MagicMock()
+    ac_state.state = "heat_cool"
+    ac_state.attributes = {
+        "hvac_modes": ["heat_cool", "off"],
+        "min_temp": 16.0,
+        "target_temp_low": 18.0,
+        "target_temp_high": 26.0,
+    }
+    hass.states.get = MagicMock(return_value=ac_state)
+
+    room = make_room(thermostats=[], acs=["climate.ac"])
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=20.0,
+        settings={},
+        has_external_sensor=True,
+    )
+    await ctrl.async_apply(
+        "idle",
+        TargetTemps(heat=None, cool=None),
+        compressor_forced_on={"climate.ac"},
+    )
+    calls = hass.services.async_call.call_args_list
+    ac_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.ac"]
+    assert len(ac_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_idle_forced_on_managed_mode():
+    """Forced_on in managed mode (no external sensor) sets target correctly."""
+    hass = build_hass()
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {"hvac_modes": ["heat", "off"], "min_temp": 5.0}
+    hass.states.get = MagicMock(return_value=trv_state)
+
+    room = make_room(temperature_sensor="")  # managed mode: no external sensor
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=False,
+    )
+    await ctrl.async_apply(
+        "idle",
+        TargetTemps(heat=21.0, cool=24.0),
+        compressor_forced_on={"climate.living_trv"},
+    )
+    calls = hass.services.async_call.call_args_list
+    # No turn-off
+    off_calls = [
+        c
+        for c in calls
+        if c[0][2].get("entity_id") == "climate.living_trv"
+        and c[0][1] == "set_hvac_mode"
+        and c[0][2].get("hvac_mode") == "off"
+    ]
+    assert len(off_calls) == 0
+    # set_temperature called with heat target
+    temp_calls = [c for c in calls if c[0][2].get("entity_id") == "climate.living_trv" and c[0][1] == "set_temperature"]
+    assert len(temp_calls) == 1
+    assert temp_calls[0][0][2]["temperature"] == 21.0
