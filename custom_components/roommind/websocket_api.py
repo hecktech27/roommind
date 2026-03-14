@@ -14,6 +14,8 @@ from .const import (
     CLIMATE_MODES,
     DEFAULT_COMFORT_COOL,
     DEFAULT_COMFORT_HEAT,
+    DEFAULT_COMPRESSOR_MIN_OFF_MINUTES,
+    DEFAULT_COMPRESSOR_MIN_RUN_MINUTES,
     DEFAULT_ECO_COOL,
     DEFAULT_ECO_HEAT,
     DOMAIN,
@@ -112,6 +114,7 @@ _SETTINGS_SAVE_FIELDS = (
     "mold_prevention_notify_targets",
     "room_order",
     "group_by_floor",
+    "compressor_groups",
 )
 
 
@@ -211,6 +214,7 @@ async def websocket_list_rooms(
             "schedule_off_action": settings.get("schedule_off_action", "eco"),
             "anyone_home": _compute_anyone_home(hass, settings),
             "valve_protection_enabled": settings.get("valve_protection_enabled", False),
+            "compressor_groups": settings.get("compressor_groups", []),
         },
     )
 
@@ -229,7 +233,7 @@ async def websocket_list_rooms(
         vol.Optional("devices"): [
             {
                 vol.Required("entity_id"): str,
-                vol.Required("type"): vol.In(["trv", "ac", "heat_pump"]),
+                vol.Required("type"): vol.In(["trv", "ac"]),
                 vol.Optional("role", default="auto"): vol.In(["primary", "secondary", "auto"]),
                 vol.Optional("heating_system_type", default=""): vol.In(["", "radiator", "underfloor"]),
             }
@@ -559,6 +563,19 @@ async def websocket_get_settings(
         ],
         vol.Optional("room_order"): [str],
         vol.Optional("group_by_floor"): bool,
+        vol.Optional("compressor_groups"): [
+            {
+                vol.Required("id"): str,
+                vol.Required("name"): str,
+                vol.Required("members"): vol.All([str], vol.Length(min=1)),
+                vol.Optional("min_run_minutes", default=DEFAULT_COMPRESSOR_MIN_RUN_MINUTES): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=60)
+                ),
+                vol.Optional("min_off_minutes", default=DEFAULT_COMPRESSOR_MIN_OFF_MINUTES): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=30)
+                ),
+            }
+        ],
     }
 )
 @websocket_api.async_response
@@ -573,6 +590,29 @@ async def websocket_save_settings(
     for key in _SETTINGS_SAVE_FIELDS:
         if key in msg:
             changes[key] = msg[key]
+
+    # Validate compressor groups
+    groups = changes.get("compressor_groups")
+    if groups:
+        all_members: list[str] = []
+        for g in groups:
+            for eid in g.get("members", []):
+                if not eid.startswith("climate."):
+                    connection.send_error(
+                        msg["id"],
+                        "invalid_member",
+                        f"Compressor group member '{eid}' is not a climate entity",
+                    )
+                    return
+            all_members.extend(g.get("members", []))
+        if len(all_members) != len(set(all_members)):
+            connection.send_error(
+                msg["id"],
+                "duplicate_member",
+                "A climate entity cannot be in multiple compressor groups",
+            )
+            return
+
     settings = await store.async_save_settings(changes)
     connection.send_result(msg["id"], {"settings": settings})
 

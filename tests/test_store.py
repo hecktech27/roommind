@@ -533,12 +533,12 @@ async def test_save_room_with_devices_syncs_legacy(store):
         {
             "devices": [
                 {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": "underfloor"},
-                {"entity_id": "climate.hp1", "type": "heat_pump", "role": "auto", "heating_system_type": ""},
+                {"entity_id": "climate.ac1", "type": "ac", "role": "auto", "heating_system_type": ""},
             ],
         },
     )
     assert room["thermostats"] == ["climate.trv1"]
-    assert room["acs"] == ["climate.hp1"]
+    assert room["acs"] == ["climate.ac1"]
     assert room["heating_system_type"] == "underfloor"
 
 
@@ -608,3 +608,32 @@ async def test_update_existing_with_legacy_syncs_devices(store):
         },
     )
     assert len(updated["devices"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_migration_heat_pump_to_ac(store):
+    """Rooms with heat_pump devices get migrated to ac on load."""
+    stored_data = {
+        "rooms": {
+            "wohnzimmer": {
+                "area_id": "wohnzimmer",
+                "thermostats": ["climate.trv1"],
+                "acs": ["climate.hp1"],
+                "devices": [
+                    {"entity_id": "climate.trv1", "type": "trv", "role": "auto", "heating_system_type": ""},
+                    {"entity_id": "climate.hp1", "type": "heat_pump", "role": "auto", "heating_system_type": ""},
+                ],
+                "schedules": [],
+            }
+        }
+    }
+    store._store.async_load = AsyncMock(return_value=stored_data)
+    await store.async_load()
+
+    # Migration should have persisted
+    assert store._store.async_save.called
+
+    room = store.get_room("wohnzimmer")
+    # heat_pump should be migrated to ac
+    assert room["devices"][1]["type"] == "ac"
+    assert room["acs"] == ["climate.hp1"]

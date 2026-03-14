@@ -33,9 +33,7 @@ export class RsDeviceSection extends LitElement {
         this.devices.filter((d) => d.type === "trv").map((d) => d.entity_id),
       );
       this._selectedCoolingDevices = new Set(
-        this.devices
-          .filter((d) => d.type === "ac" || d.type === "heat_pump")
-          .map((d) => d.entity_id),
+        this.devices.filter((d) => d.type === "ac").map((d) => d.entity_id),
       );
       this._heatingSystemType = resolveHeatingSystemType(this.devices);
     }
@@ -751,16 +749,9 @@ export class RsDeviceSection extends LitElement {
                     label: localize("devices.type_thermostat", this.hass.language),
                   },
                   { value: "ac", label: localize("devices.type_ac", this.hass.language) },
-                  {
-                    value: "heat_pump",
-                    label: localize("devices.type_heat_pump", this.hass.language),
-                  },
                 ]}
                 @selected=${(e: Event) => {
-                  this._onDeviceTypeChange(
-                    entityId,
-                    getSelectValue(e) as "thermostat" | "ac" | "heat_pump",
-                  );
+                  this._onDeviceTypeChange(entityId, getSelectValue(e) as "thermostat" | "ac");
                 }}
                 @closed=${(e: Event) => e.stopPropagation()}
                 fixedMenuPosition
@@ -770,9 +761,6 @@ export class RsDeviceSection extends LitElement {
                 >
                 <ha-list-item value="ac"
                   >${localize("devices.type_ac", this.hass.language)}</ha-list-item
-                >
-                <ha-list-item value="heat_pump"
-                  >${localize("devices.type_heat_pump", this.hass.language)}</ha-list-item
                 >
               </ha-select>
             `
@@ -872,14 +860,12 @@ export class RsDeviceSection extends LitElement {
 
   // ---- Event handlers ----
 
-  private _detectClimateType(entityId: string): "thermostat" | "ac" | "heat_pump" {
+  private _detectClimateType(entityId: string): "thermostat" | "ac" {
     const state = this.hass.states[entityId];
     const modes = (state?.attributes?.hvac_modes ?? []) as string[];
     // Only explicit heat/cool modes count. "auto" is ambiguous (device self-regulates)
     // and should not influence the initial classification. User can override manually.
-    const canHeat = modes.some((m) => ["heat", "heat_cool"].includes(m));
     const canCool = modes.some((m) => ["cool", "heat_cool"].includes(m));
-    if (canHeat && canCool) return "heat_pump";
     if (canCool) return "ac";
     return "thermostat";
   }
@@ -887,7 +873,6 @@ export class RsDeviceSection extends LitElement {
   private _getDeviceDisplayType(entityId: string): string {
     const device = this.devices.find((d) => d.entity_id === entityId);
     if (!device) return "thermostat";
-    if (device.type === "heat_pump") return "heat_pump";
     if (device.type === "ac") return "ac";
     return "thermostat";
   }
@@ -896,8 +881,7 @@ export class RsDeviceSection extends LitElement {
     let newDevices: DeviceConfig[];
     if (checked) {
       const detected = this._detectClimateType(entityId);
-      const type: DeviceType =
-        detected === "thermostat" ? "trv" : detected === "ac" ? "ac" : "heat_pump";
+      const type: DeviceType = detected === "thermostat" ? "trv" : "ac";
       newDevices = [...this.devices, { entity_id: entityId, type, role: "auto" }];
     } else {
       newDevices = this.devices.filter((d) => d.entity_id !== entityId);
@@ -905,9 +889,8 @@ export class RsDeviceSection extends LitElement {
     this._fireDeviceChanged(newDevices);
   }
 
-  private _onDeviceTypeChange(entityId: string, type: "thermostat" | "ac" | "heat_pump") {
-    const deviceType: DeviceType =
-      type === "thermostat" ? "trv" : type === "ac" ? "ac" : "heat_pump";
+  private _onDeviceTypeChange(entityId: string, type: "thermostat" | "ac") {
+    const deviceType: DeviceType = type === "thermostat" ? "trv" : "ac";
     const newDevices = this.devices.map((d) =>
       d.entity_id === entityId ? { ...d, type: deviceType } : d,
     );
@@ -1029,8 +1012,7 @@ export class RsDeviceSection extends LitElement {
 
     if (category === "climate") {
       const detected = this._detectClimateType(entityId);
-      const type: DeviceType =
-        detected === "thermostat" ? "trv" : detected === "ac" ? "ac" : "heat_pump";
+      const type: DeviceType = detected === "thermostat" ? "trv" : "ac";
       const newDevices = [...this.devices, { entity_id: entityId, type, role: "auto" as const }];
       this._fireDeviceChanged(newDevices);
       // Clear the picker value

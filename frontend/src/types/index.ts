@@ -51,7 +51,7 @@ export interface RoomLiveData {
   active_heat_sources: string | null;
 }
 
-export type DeviceType = "trv" | "ac" | "heat_pump";
+export type DeviceType = "trv" | "ac";
 export type DeviceRole = "primary" | "secondary" | "auto";
 
 export interface DeviceConfig {
@@ -59,6 +59,14 @@ export interface DeviceConfig {
   type: DeviceType;
   role: DeviceRole;
   heating_system_type?: string;
+}
+
+export interface CompressorGroup {
+  id: string;
+  name: string;
+  members: string[];
+  min_run_minutes: number;
+  min_off_minutes: number;
 }
 
 export interface RoomConfig {
@@ -134,6 +142,7 @@ export interface GlobalSettings {
   mold_prevention_intensity?: "light" | "medium" | "strong";
   mold_prevention_notify_enabled?: boolean;
   mold_prevention_notify_targets?: NotificationTarget[];
+  compressor_groups?: CompressorGroup[];
   room_order?: string[];
   group_by_floor?: boolean;
   boost_applied_at?: Record<string, number>;

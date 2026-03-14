@@ -16,6 +16,7 @@ from custom_components.roommind.utils.device_utils import (
     is_ac_type,
     is_trv_type,
     legacy_to_devices,
+    migrate_heat_pump_devices,
 )
 
 # ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ from custom_components.roommind.utils.device_utils import (
 
 
 def test_valid_device_types():
-    assert VALID_DEVICE_TYPES == {"trv", "ac", "heat_pump"}
+    assert VALID_DEVICE_TYPES == {"trv", "ac"}
 
 
 def test_device_role_auto_constant():
@@ -85,13 +86,6 @@ def test_devices_to_legacy_basic():
     thermostats, acs = devices_to_legacy(devices)
     assert thermostats == ["climate.trv1"]
     assert acs == ["climate.ac1"]
-
-
-def test_devices_to_legacy_heat_pump_counts_as_ac():
-    devices = [{"entity_id": "climate.hp1", "type": "heat_pump"}]
-    thermostats, acs = devices_to_legacy(devices)
-    assert thermostats == []
-    assert acs == ["climate.hp1"]
 
 
 def test_devices_to_legacy_unknown_type_skipped():
@@ -256,7 +250,7 @@ def test_get_room_heating_system_type_no_trvs():
 _MIXED_DEVICES = [
     {"entity_id": "climate.trv1", "type": "trv"},
     {"entity_id": "climate.ac1", "type": "ac"},
-    {"entity_id": "climate.hp1", "type": "heat_pump"},
+    {"entity_id": "climate.ac2", "type": "ac"},
 ]
 
 
@@ -265,7 +259,7 @@ def test_get_all_entity_ids():
     assert get_all_entity_ids(_MIXED_DEVICES) == [
         "climate.trv1",
         "climate.ac1",
-        "climate.hp1",
+        "climate.ac2",
     ]
 
 
@@ -274,12 +268,12 @@ def test_get_all_entity_ids_trvs_first():
     devices = [
         {"entity_id": "climate.ac1", "type": "ac"},
         {"entity_id": "climate.trv1", "type": "trv"},
-        {"entity_id": "climate.hp1", "type": "heat_pump"},
+        {"entity_id": "climate.ac2", "type": "ac"},
     ]
     assert get_all_entity_ids(devices) == [
         "climate.trv1",
         "climate.ac1",
-        "climate.hp1",
+        "climate.ac2",
     ]
 
 
@@ -293,12 +287,12 @@ def test_get_trv_eids():
 
 
 def test_get_ac_eids():
-    assert get_ac_eids(_MIXED_DEVICES) == ["climate.ac1", "climate.hp1"]
+    assert get_ac_eids(_MIXED_DEVICES) == ["climate.ac1", "climate.ac2"]
 
 
 def test_get_entity_ids_by_type_multi():
-    result = get_entity_ids_by_type(_MIXED_DEVICES, "trv", "heat_pump")
-    assert result == ["climate.trv1", "climate.hp1"]
+    result = get_entity_ids_by_type(_MIXED_DEVICES, "trv", "ac")
+    assert result == ["climate.trv1", "climate.ac1", "climate.ac2"]
 
 
 def test_get_entity_ids_by_type_no_match():
@@ -337,9 +331,29 @@ def test_is_ac_type_ac():
     assert is_ac_type({"type": "ac"}) is True
 
 
-def test_is_ac_type_heat_pump():
-    assert is_ac_type({"type": "heat_pump"}) is True
-
-
 def test_is_ac_type_trv():
     assert is_ac_type({"type": "trv"}) is False
+
+
+# ---------------------------------------------------------------------------
+# migrate_heat_pump_devices
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_heat_pump_devices():
+    devices = [
+        {"entity_id": "climate.hp1", "type": "heat_pump", "role": "auto"},
+        {"entity_id": "climate.trv1", "type": "trv", "role": "auto"},
+        {"entity_id": "climate.ac1", "type": "ac", "role": "auto"},
+    ]
+    result = migrate_heat_pump_devices(devices)
+    assert result is True
+    assert devices[0]["type"] == "ac"
+    assert devices[1]["type"] == "trv"
+    assert devices[2]["type"] == "ac"
+
+
+def test_migrate_heat_pump_devices_no_change():
+    devices = [{"entity_id": "climate.trv1", "type": "trv"}]
+    result = migrate_heat_pump_devices(devices)
+    assert result is False

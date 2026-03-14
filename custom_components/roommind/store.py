@@ -23,6 +23,7 @@ from .utils.device_utils import (
     ensure_room_has_devices,
     get_room_heating_system_type,
     legacy_to_devices,
+    migrate_heat_pump_devices,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def _migrate_room_temps(room: dict) -> dict:
 def _migrate_room(room: dict) -> dict:
     """Apply all read-time migrations (safety net)."""
     _migrate_room_temps(room)
+    migrate_heat_pump_devices(room.get("devices", []))
     ensure_room_has_devices(room)
     return room
 
@@ -81,6 +83,18 @@ class RoomMindStore:
         if migrated:
             await self._async_save()
             _LOGGER.info("Migrated %d room(s) to unified device model", migrated)
+
+        # One-time migration: heat_pump -> ac (safety net for beta testers)
+        hp_migrated = 0
+        for room in self._data.values():
+            if migrate_heat_pump_devices(room.get("devices", [])):
+                t, a = devices_to_legacy(room["devices"])
+                room["thermostats"] = t
+                room["acs"] = a
+                hp_migrated += 1
+        if hp_migrated:
+            await self._async_save()
+            _LOGGER.info("Migrated %d room(s) from heat_pump to ac device type", hp_migrated)
 
     async def _async_save(self) -> None:
         """Persist current room data to the HA store."""

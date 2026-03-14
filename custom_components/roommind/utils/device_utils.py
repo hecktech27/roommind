@@ -11,8 +11,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DEVICE_TYPE_TRV = "trv"
 DEVICE_TYPE_AC = "ac"
-DEVICE_TYPE_HEAT_PUMP = "heat_pump"
-VALID_DEVICE_TYPES = {DEVICE_TYPE_TRV, DEVICE_TYPE_AC, DEVICE_TYPE_HEAT_PUMP}
+VALID_DEVICE_TYPES = {DEVICE_TYPE_TRV, DEVICE_TYPE_AC}
 
 DEVICE_ROLE_AUTO = "auto"
 
@@ -57,7 +56,7 @@ def legacy_to_devices(
 def devices_to_legacy(devices: list[dict]) -> tuple[list[str], list[str]]:
     """Extract thermostats/acs lists from devices[].
 
-    TRV -> thermostats, AC/heat_pump -> acs.
+    TRV -> thermostats, AC -> acs.
     Devices with unknown types or missing entity_id are logged and skipped.
     """
     thermostats: list[str] = []
@@ -70,7 +69,7 @@ def devices_to_legacy(devices: list[dict]) -> tuple[list[str], list[str]]:
         dtype = d.get("type")
         if dtype == DEVICE_TYPE_TRV:
             thermostats.append(eid)
-        elif dtype in (DEVICE_TYPE_AC, DEVICE_TYPE_HEAT_PUMP):
+        elif dtype == DEVICE_TYPE_AC:
             acs.append(eid)
         else:
             _LOGGER.warning("Skipping device with unknown type '%s': %s", dtype, eid)
@@ -158,8 +157,8 @@ def get_trv_eids(devices: list[dict]) -> list[str]:
 
 
 def get_ac_eids(devices: list[dict]) -> list[str]:
-    """Shortcut for get_entity_ids_by_type(devices, "ac", "heat_pump")."""
-    return get_entity_ids_by_type(devices, DEVICE_TYPE_AC, DEVICE_TYPE_HEAT_PUMP)
+    """Shortcut for get_entity_ids_by_type(devices, "ac")."""
+    return get_entity_ids_by_type(devices, DEVICE_TYPE_AC)
 
 
 def get_device_by_eid(devices: list[dict], entity_id: str) -> dict | None:
@@ -176,5 +175,15 @@ def is_trv_type(device: dict) -> bool:
 
 
 def is_ac_type(device: dict) -> bool:
-    """True if device type is AC or heat pump."""
-    return device.get("type") in (DEVICE_TYPE_AC, DEVICE_TYPE_HEAT_PUMP)
+    """True if device type is AC."""
+    return device.get("type") == DEVICE_TYPE_AC
+
+
+def migrate_heat_pump_devices(devices: list[dict]) -> bool:
+    """Convert any heat_pump devices to ac. Returns True if any were migrated."""
+    migrated = False
+    for d in devices:
+        if d.get("type") == "heat_pump":
+            d["type"] = DEVICE_TYPE_AC
+            migrated = True
+    return migrated

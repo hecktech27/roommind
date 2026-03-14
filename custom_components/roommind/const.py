@@ -137,6 +137,10 @@ HEAT_SOURCE_HYSTERESIS = 0.3  # °C hysteresis band to prevent oscillation
 HEAT_SOURCE_LARGE_GAP_MULTIPLIER = 2.0  # activate both sources when gap > primary_delta * this
 HEAT_SOURCE_SECONDARY_POWER_SCALE = 0.7  # throttle secondary when both active (prevent overshoot)
 
+# Compressor group defaults
+DEFAULT_COMPRESSOR_MIN_RUN_MINUTES = 15
+DEFAULT_COMPRESSOR_MIN_OFF_MINUTES = 5
+
 
 # Far-future sentinel: vacation active indefinitely (year 2999)
 VACATION_SENTINEL_UNTIL = 32503680000.0

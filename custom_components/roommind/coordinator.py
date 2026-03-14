@@ -43,6 +43,7 @@ from .control.mpc_controller import (
 )
 from .control.solar import compute_q_solar_norm
 from .control.thermal_model import RoomModelManager
+from .managers.compressor_group_manager import CompressorGroupManager
 from .managers.cover_orchestrator import CoverOrchestrator
 from .managers.ekf_training_manager import EkfTrainingManager
 from .managers.heat_source_orchestrator import HeatSourcePlan, evaluate_heat_sources
@@ -110,6 +111,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         self._cover_manager = CoverManager()
         self._cover_orchestrator = CoverOrchestrator(hass, self._cover_manager, self._model_manager)
+        # Compressor group management (min-run / min-off protection)
+        self._compressor_manager = CompressorGroupManager()
         # Heat source orchestration state (per room)
         self._heat_source_states: dict[str, str] = {}
         # Track which rooms already have entity platform entities registered
@@ -148,6 +151,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self.outdoor_humidity = read_sensor_value(
             self.hass, settings.get("outdoor_humidity_sensor"), "global", "outdoor humidity"
         )
+
+        # Load compressor groups from settings (every cycle, cheap)
+        self._compressor_manager.load_groups(settings.get("compressor_groups", []))
 
         # Load thermal model and valve actuation data from store (once)
         if not self._model_loaded:
@@ -487,18 +493,6 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         climate_active = settings.get("climate_control_active", True)
 
-        # --- Residual heat transition tracking ---
-        # Only track when climate control is active — RoomMind-initiated heating
-        # transitions don't exist when control is disabled.
-        if climate_active and system_type:
-            self._residual_tracker.update(
-                area_id,
-                mode,
-                power_fraction,
-                self._previous_modes.get(area_id, MODE_IDLE),
-                q_residual=q_residual,
-            )
-
         # Read device temperature limits for dynamic boost targets
         trv_max_temps: list[float] = []
         for eid in get_trv_eids(room.get("devices", [])):
@@ -548,6 +542,38 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             # so re-enabling starts fresh.
             self._heat_source_states.pop(area_id, None)
 
+        # Compressor group constraints
+        all_device_eids = get_all_entity_ids(room.get("devices", []))
+        compressor_forced_on: set[str] = set()
+        compressor_forced_off: set[str] = set()
+
+        if all_device_eids and climate_active and not window_open and not force_off:
+            for eid in all_device_eids:
+                if self._compressor_manager.get_group_for_entity(eid) is None:
+                    continue
+                if mode != MODE_IDLE:
+                    if not self._compressor_manager.check_can_activate(eid):
+                        compressor_forced_off.add(eid)
+                else:
+                    if self._compressor_manager.check_must_stay_active(eid):
+                        compressor_forced_on.add(eid)
+
+            if compressor_forced_off and compressor_forced_off >= set(all_device_eids):
+                mode = MODE_IDLE
+                power_fraction = 0.0
+                compressor_forced_off.clear()
+
+        # --- Residual heat transition tracking ---
+        # After compressor constraints may have changed mode to IDLE.
+        if climate_active and system_type:
+            self._residual_tracker.update(
+                area_id,
+                mode,
+                power_fraction,
+                self._previous_modes.get(area_id, MODE_IDLE),
+                q_residual=q_residual,
+            )
+
         if climate_active:
             try:
                 await controller.async_apply(
@@ -560,7 +586,23 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     ac_heating_boost_target=ac_device_max_temp,
                     cooling_boost_target=device_min_temp,
                     heat_source_plan=heat_source_plan,
+                    compressor_forced_on=compressor_forced_on or None,
+                    compressor_forced_off=compressor_forced_off or None,
                 )
+                # Update compressor group member states
+                for eid in all_device_eids:
+                    if self._compressor_manager.get_group_for_entity(eid) is None:
+                        continue
+                    if eid in cycling_eids:
+                        continue
+                    if eid in compressor_forced_off:
+                        self._compressor_manager.update_member(eid, False)
+                    elif eid in compressor_forced_on:
+                        self._compressor_manager.update_member(eid, True)
+                    elif mode != MODE_IDLE:
+                        self._compressor_manager.update_member(eid, True)
+                    else:
+                        self._compressor_manager.update_member(eid, False)
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "Room '%s': climate service call failed",

@@ -669,8 +669,13 @@ class MPCController:
         ac_heating_boost_target: float | None = None,
         cooling_boost_target: float | None = None,
         heat_source_plan: HeatSourcePlan | None = None,
+        compressor_forced_on: set[str] | None = None,
+        compressor_forced_off: set[str] | None = None,
     ) -> None:
         """Apply the determined mode with proportional valve control."""
+        _forced_on = compressor_forced_on or set()
+        _forced_off = compressor_forced_off or set()
+
         # Backward compat: accept legacy keyword
         if target_temp is not _SENTINEL:
             targets = target_temp  # type: ignore[assignment]
@@ -717,6 +722,9 @@ class MPCController:
             ha_heat_target = celsius_to_ha_temp(self.hass, targets.heat) if targets.heat is not None else None
             ha_cool_target = celsius_to_ha_temp(self.hass, targets.cool) if targets.cool is not None else None
             for eid in thermostats:
+                if eid in _forced_off:
+                    await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
+                    continue
                 if can_heat and ha_heat_target is not None:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
                     await self._call(
@@ -725,6 +733,9 @@ class MPCController:
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
             for eid in self.acs:
+                if eid in _forced_off:
+                    await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
+                    continue
                 ac_state = self.hass.states.get(eid)
                 ac_modes = (ac_state.attributes.get("hvac_modes") or []) if ac_state else []
                 ac_target = ha_cool_target if ha_cool_target is not None else ha_heat_target
@@ -785,6 +796,11 @@ class MPCController:
             # Orchestrated heating: route power to specific devices per plan
             for cmd in heat_source_plan.commands:
                 if cmd.entity_id in _exclude:
+                    continue
+                if cmd.entity_id in _forced_on and not cmd.active:
+                    continue  # Compressor protection overrides orchestrator
+                if cmd.entity_id in _forced_off and cmd.active:
+                    await async_turn_off_climate(self.hass, cmd.entity_id, area_id=self._area_id)
                     continue
                 if cmd.active:
                     if cmd.device_type == "thermostat":
@@ -875,6 +891,9 @@ class MPCController:
                 trv_target = trv_heat_boost if self.has_external_sensor else effective_target
             ha_trv = celsius_to_ha_temp(self.hass, trv_target)
             for eid in thermostats:
+                if eid in _forced_off:
+                    await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
+                    continue
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
                 await self._call("set_temperature", {"entity_id": eid, "temperature": ha_trv}, temp_intent="heat")
             # ACs: proportional setpoint in Full Control, actual target otherwise
@@ -889,6 +908,9 @@ class MPCController:
                 ac_heat_target = effective_target
             ha_ac_target = celsius_to_ha_temp(self.hass, ac_heat_target)
             for eid in self.acs:
+                if eid in _forced_off:
+                    await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
+                    continue
                 ac_state = self.hass.states.get(eid)
                 ac_modes = (ac_state.attributes.get("hvac_modes") or []) if ac_state else []
                 if "heat" in ac_modes:
@@ -920,13 +942,26 @@ class MPCController:
                 ac_cool_target = effective_target
             ha_target = celsius_to_ha_temp(self.hass, ac_cool_target)
             for eid in self.acs:
+                if eid in _forced_off:
+                    await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
+                    continue
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "cool"})
                 await self._call("set_temperature", {"entity_id": eid, "temperature": ha_target}, temp_intent="cool")
             for eid in thermostats:
+                if eid in _forced_off:
+                    await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
+                    continue
                 await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
         elif mode == MODE_IDLE:
             for eid in thermostats + self.acs:
-                await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
+                if eid in _forced_on:
+                    _LOGGER.debug(
+                        "Area '%s': keeping '%s' active (compressor min-run protection)",
+                        self._area_id,
+                        eid,
+                    )
+                    continue
+                await async_turn_off_climate(self.hass, eid, area_id=self._area_id)
 
     async def _call(self, service: str, data: dict, *, temp_intent: str = "") -> None:
         eid = data.get("entity_id")
