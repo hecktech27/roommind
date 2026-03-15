@@ -60,5 +60,11 @@ jobs:
         run: |
           echo "## Mutation: \`${{ matrix.module }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          # Only write the summary line, not all mutant details (1MB limit)
-          mutmut results 2>&1 | head -20 >> $GITHUB_STEP_SUMMARY || true
+          # Capture full output, write only the stats (first few lines) to summary
+          mutmut results > /tmp/mutmut-full.txt 2>&1 || true
+          # Extract lines with kill counts (typically "killed X out of Y")
+          grep -iE "killed|survived|total|score|untested|timeout" /tmp/mutmut-full.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          # Count survived mutants
+          SURVIVED=$(grep -c "^Survived" /tmp/mutmut-full.txt 2>/dev/null || echo "0")
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Survived mutants:** $SURVIVED" >> $GITHUB_STEP_SUMMARY
