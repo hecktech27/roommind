@@ -247,6 +247,8 @@ class ThermalEKF:
 
     # Process noise (diagonal of Q_noise matrix)
     # Higher values keep the filter adaptive; lower values freeze parameters.
+    # Note: beta_h/beta_c/beta_s noise is mode-gated in _predict_step —
+    # only applied when the parameter is observable (Jacobian F[0][i] ≠ 0).
     _Q_T: float = 0.01  # unmodeled disturbances (~0.1 degC/step)
     _Q_ALPHA: float = 0.001  # building property drift (10x previous)
     _Q_BETA_H: float = 0.005  # HVAC power drift (5x previous)
@@ -653,7 +655,19 @@ class ThermalEKF:
         # Covariance prediction: P = F @ P @ F^T + Q_noise
         N = self._N
         P = self._P
-        Q = [self._Q_T, self._Q_ALPHA, self._Q_BETA_H, self._Q_BETA_C, self._Q_BETA_S]
+        # Mode-gated process noise: only add drift to parameters that are
+        # currently observable (Jacobian F[0][i] ≠ 0).  Unobservable params
+        # keep their variance frozen — inflating it without any measurement
+        # to reduce it again just degrades confidence and destabilises the
+        # correlated parameters (alpha ↔ beta_h coupling → time-constant
+        # oscillation).
+        Q = [
+            self._Q_T,
+            self._Q_ALPHA,
+            self._Q_BETA_H if (mode == "heating" or (mode == "idle" and q_residual > 0)) else 0.0,
+            self._Q_BETA_C if mode == "cooling" else 0.0,
+            self._Q_BETA_S if q_solar > 0 else 0.0,
+        ]
 
         # FP = F @ P
         FP = [[sum(F[i][k] * P[k][j] for k in range(N)) for j in range(N)] for i in range(N)]
