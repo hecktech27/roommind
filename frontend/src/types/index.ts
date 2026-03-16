@@ -152,6 +152,11 @@ export interface GlobalSettings {
 }
 
 // HA types for panel integration
+export interface HassConnection {
+  addEventListener(event: string, callback: () => void): void;
+  removeEventListener(event: string, callback: () => void): void;
+}
+
 export interface HomeAssistant {
   callWS: <T>(msg: Record<string, unknown>) => Promise<T>;
   callService: (domain: string, service: string, data?: Record<string, unknown>) => Promise<void>;
@@ -162,6 +167,7 @@ export interface HomeAssistant {
   devices: Record<string, HassDeviceRegistryEntry>;
   language: string;
   config: { unit_system: { temperature: string } };
+  connection?: HassConnection;
 }
 
 export interface HassArea {
