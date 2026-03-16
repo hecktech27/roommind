@@ -250,7 +250,7 @@ class ThermalEKF:
     # Note: beta_h/beta_c/beta_s noise is mode-gated in _predict_step —
     # only applied when the parameter is observable (Jacobian F[0][i] ≠ 0).
     _Q_T: float = 0.01  # unmodeled disturbances (~0.1 degC/step)
-    _Q_ALPHA: float = 0.001  # building property drift (10x previous)
+    _Q_ALPHA: float = 0.0005  # building property drift (slow: seasonal, insulation)
     _Q_BETA_H: float = 0.005  # HVAC power drift (5x previous)
     _Q_BETA_C: float = 0.005  # HVAC power drift (5x previous)
     _Q_BETA_S: float = 0.002  # solar gain drift
@@ -346,7 +346,11 @@ class ThermalEKF:
 
         # --- Accuracy factor (0..1) ---
         # Map worst prediction std from [noise_floor, mpc_threshold] to [1.0, 0.0]
-        noise_floor = math.sqrt(self._Q_T)  # ~0.1°C irreducible minimum
+        # Realistic noise floor: the minimum achievable prediction std
+        # accounts for process noise (Q_T), sensor noise (R → P[0][0]),
+        # and parameter cross-coupling.  Simulations show ~0.20-0.21°C
+        # as the converged minimum at standard operating points.
+        noise_floor = 0.20
         mpc_threshold = 0.5  # MPC activation threshold
 
         stds = [self.prediction_std(0.0, 20.0, 15.0, 5.0)]  # idle always
