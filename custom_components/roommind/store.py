@@ -224,6 +224,7 @@ class RoomMindStore:
                 "heat_source_ac_min_outdoor": config.get(
                     "heat_source_ac_min_outdoor", DEFAULT_HEAT_SOURCE_AC_MIN_OUTDOOR
                 ),
+                "climate_control_enabled": config.get("climate_control_enabled", True),
             }
             # Directional device sync for new rooms
             if "devices" in config and config["devices"]:

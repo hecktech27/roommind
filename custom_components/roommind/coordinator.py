@@ -120,6 +120,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         # Min-run enforcement: timestamp when current non-idle mode started
         self._mode_on_since: dict[str, float] = {}
         self._switch_entity_areas: set[str] = set()
+        self._climate_control_switch_areas: set[str] = set()
         self._binary_sensor_entity_areas: set[str] = set()
         self._climate_entity_areas: set[str] = set()
         # Entity platform callbacks, set by platform async_setup_entry
@@ -491,7 +492,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         observed_mode: str | None = None
         observed_pf = 0.0
 
-        climate_active = settings.get("climate_control_active", True)
+        climate_active = settings.get("climate_control_active", True) and room.get("climate_control_enabled", True)
 
         # Read device temperature limits for dynamic boost targets
         trv_max_temps: list[float] = []
@@ -1114,6 +1115,16 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             self.async_add_climate_entities(_create_room_climates(self, area_id))
             self._climate_entity_areas.add(area_id)
 
+        if (
+            area_id not in self._climate_control_switch_areas
+            and hasattr(self, "async_add_switch_entities")
+            and self.async_add_switch_entities
+        ):
+            from .switch import RoomMindClimateControlSwitch
+
+            self.async_add_switch_entities([RoomMindClimateControlSwitch(self, area_id)])
+            self._climate_control_switch_areas.add(area_id)
+
         # Cover entities: only create when covers are configured.
         # Not removed on save — cleanup_orphaned_entities() handles that at startup
         # so brief config changes don't break user automations.
@@ -1165,6 +1176,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self._entity_areas.discard(area_id)
         self._mode_on_since.pop(area_id, None)
         self._switch_entity_areas.discard(area_id)
+        self._climate_control_switch_areas.discard(area_id)
         self._binary_sensor_entity_areas.discard(area_id)
         self._climate_entity_areas.discard(area_id)
         self._model_manager.remove_room(area_id)
@@ -1186,7 +1198,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         registry = er.async_get(self.hass)
 
         # Known valid suffixes for each condition
-        always_valid = ("_target_temp", "_mode", "_override")
+        always_valid = ("_target_temp", "_mode", "_override", "_climate_control")
         cover_only = ("_cover_auto", "_cover_paused")
         # Global entities (not per-room) that should never be cleaned up
         global_uids = {f"{DOMAIN}_vacation"}
