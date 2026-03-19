@@ -937,6 +937,7 @@ class MPCController:
                 ac_state = self.hass.states.get(eid)
                 ac_modes = _effective_ac_modes(ac_state)
                 ac_target = ha_cool_target if ha_cool_target is not None else ha_heat_target
+                ac_heat_target = ha_heat_target if ha_heat_target is not None else ha_cool_target
                 if ac_target is None:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
                 elif "heat_cool" in ac_modes:
@@ -979,12 +980,12 @@ class MPCController:
                 elif can_heat and "heat" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "heat"})
                     await self._call(
-                        "set_temperature", {"entity_id": eid, "temperature": ac_target}, temp_intent="heat"
+                        "set_temperature", {"entity_id": eid, "temperature": ac_heat_target}, temp_intent="heat"
                     )
                 elif "auto" in ac_modes:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "auto"})
                     await self._call(
-                        "set_temperature", {"entity_id": eid, "temperature": ac_target}, temp_intent="heat"
+                        "set_temperature", {"entity_id": eid, "temperature": ac_heat_target}, temp_intent="heat"
                     )
                 else:
                     await self._call("set_hvac_mode", {"entity_id": eid, "hvac_mode": "off"})
