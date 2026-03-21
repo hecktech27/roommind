@@ -239,7 +239,7 @@ export class RsDeviceSection extends LitElement {
     .setpoint-mode-hint {
       font-size: 12px;
       color: var(--secondary-text-color);
-      margin-top: 2px;
+      padding: 2px 14px 4px 42px;
     }
 
     .valve-exclude-row {
@@ -459,7 +459,8 @@ export class RsDeviceSection extends LitElement {
     const device =
       type === "climate" ? this.devices.find((d) => d.entity_id === entityId) : undefined;
     const showIdleBadge = device?.idle_action === "fan_only" || device?.idle_action === "setback";
-    const showDirectBadge = device?.setpoint_mode === "direct" && !!this.selectedTempSensor;
+    const showDirectBadge =
+      device?.type === "trv" && device?.setpoint_mode === "direct" && !!this.selectedTempSensor;
 
     return html`
       <div class="view-row">
@@ -882,7 +883,7 @@ export class RsDeviceSection extends LitElement {
       })()}
       ${(() => {
         const device = this.devices.find((d) => d.entity_id === entityId);
-        if (!isSelected || !this.selectedTempSensor) return nothing;
+        if (!isSelected || !this.selectedTempSensor || device?.type !== "trv") return nothing;
         return html`
           <div class="setpoint-mode-row">
             <ha-select
@@ -909,9 +910,9 @@ export class RsDeviceSection extends LitElement {
                 >${localize("devices.setpoint_mode_direct", this.hass.language)}</ha-list-item
               >
             </ha-select>
-            <div class="setpoint-mode-hint">
-              ${localize("devices.setpoint_mode_hint", this.hass.language)}
-            </div>
+          </div>
+          <div class="setpoint-mode-hint">
+            ${localize("devices.setpoint_mode_hint", this.hass.language)}
           </div>
         `;
       })()}
