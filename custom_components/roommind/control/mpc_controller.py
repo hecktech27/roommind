@@ -387,8 +387,8 @@ _ASSUMED_FULL_MODES: list[str] = ["off", "heat", "cool", "fan_only"]
 def _effective_ac_modes(state: Any) -> list[str]:
     """Return hvac_modes, assuming full capability when modes appear unreliable.
 
-    When a device is off and reports no active modes (heat/cool/heat_cool/auto),
-    the integration likely hides modes while off or is misconfigured.  Return a
+    When a device reports no active modes (heat/cool/heat_cool/auto),
+    the integration likely hides modes or is misconfigured.  Return a
     generous assumed set so the command cascade picks the right mode.  The actual
     service call may still fail — the caller's try/except handles that safely.
     """
@@ -1275,12 +1275,12 @@ class MPCController:
             resolved = resolve_hvac_mode(data["hvac_mode"], hvac_modes)
             if resolved is None:
                 if not has_reliable_hvac_modes(state):
-                    # Modes unreliable (device off with incomplete modes).
-                    # Send the desired mode directly; turning the device on
-                    # should reveal the full mode list.
+                    # Modes unreliable (device with incomplete modes).
+                    # Send the desired mode directly; the device may reveal
+                    # its full mode list once active.
                     resolved = data["hvac_mode"]
                     _LOGGER.debug(
-                        "Area '%s': device '%s' off with incomplete modes, sending '%s' directly",
+                        "Area '%s': device '%s' has incomplete modes, sending '%s' directly",
                         self._area_id,
                         eid,
                         resolved,
