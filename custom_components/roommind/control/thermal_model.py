@@ -6,10 +6,13 @@ Reparametrized for identifiability (C=1 normalization):
   alpha = U/C   [1/h]  heat loss rate
   beta_h = Q_heat/C  [degC/h]  heating rate
   beta_c = Q_cool/C  [degC/h]  cooling rate
+  beta_s = Q_solar/C [degC/h per kW/m²]  solar gain rate
+  beta_o = Q_occupancy/C [degC/h]  occupancy heat gain rate
 
 RCModel solves the ODE analytically (exact for constant inputs over a time step).
-ThermalEKF learns alpha, beta_h, beta_c online from temperature measurements
-using an Extended Kalman Filter with augmented state [T, alpha, beta_h, beta_c].
+ThermalEKF learns alpha, beta_h, beta_c, beta_s, beta_o online from temperature
+measurements using an Extended Kalman Filter with augmented state
+[T, alpha, beta_h, beta_c, beta_s, beta_o].
 RoomModelManager provides per-room model access for the coordinator.
 """
 
@@ -45,6 +48,7 @@ class RCModel:
     DEFAULT_Q_HEAT: float = 800.0  # W      -- heating power
     DEFAULT_Q_COOL: float = 1200.0  # W      -- cooling power
     DEFAULT_Q_SOLAR: float = 0.0  # degC/h per kW/m² GHI -- solar gain
+    DEFAULT_Q_OCCUPANCY: float = 0.0  # degC/h -- occupancy heat gain
 
     def __init__(
         self,
@@ -53,12 +57,14 @@ class RCModel:
         Q_heat: float = DEFAULT_Q_HEAT,
         Q_cool: float = DEFAULT_Q_COOL,
         Q_solar: float = DEFAULT_Q_SOLAR,
+        Q_occupancy: float = DEFAULT_Q_OCCUPANCY,
     ) -> None:
         self.C = C
         self.U = U
         self.Q_heat = Q_heat
         self.Q_cool = Q_cool
         self.Q_solar = Q_solar
+        self.Q_occupancy = Q_occupancy
 
     def predict(
         self,
@@ -69,6 +75,7 @@ class RCModel:
         *,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> float:
         """Predict room temperature after *dt_minutes* using the analytical solution.
 
@@ -79,6 +86,7 @@ class RCModel:
             dt_minutes: time step in minutes.
             q_solar: normalized solar irradiance (GHI/1000, 0–1).
             q_residual: residual heat fraction from thermal mass (0–1).
+            q_occupancy: occupancy signal (0 = unoccupied, 1 = occupied).
 
         Returns:
             Predicted room temperature [degC], clamped to [0, 50].
@@ -88,8 +96,8 @@ class RCModel:
         dt_hours = dt_minutes / 60.0
         # Residual heat: only contributes when HVAC is off (no double-counting)
         Q_residual = self.Q_heat * q_residual if Q_active == 0.0 and q_residual > 0 else 0.0
-        # Total thermal input including solar gain and residual heat
-        Q_total = Q_active + self.Q_solar * q_solar + Q_residual
+        # Total thermal input including solar gain, occupancy heat, and residual heat
+        Q_total = Q_active + self.Q_solar * q_solar + self.Q_occupancy * q_occupancy + Q_residual
         # Equilibrium temperature: T_out + Q/U
         T_eq = T_outdoor + Q_total / self.U
         # Physical clamp: no room equilibrates outside [0, 50] degC
@@ -132,6 +140,7 @@ class RCModel:
         *,
         q_solar_series: list[float] | None = None,
         q_residual_series: list[float] | None = None,
+        q_occupancy_series: list[float] | None = None,
     ) -> list[float]:
         """Predict a temperature trajectory over multiple time steps.
 
@@ -145,6 +154,7 @@ class RCModel:
             dt_minutes: duration of each step in minutes.
             q_solar_series: normalized solar irradiance per step (GHI/1000).
             q_residual_series: residual heat fraction per step (0–1).
+            q_occupancy_series: occupancy signal per step (0 or 1).
 
         Returns:
             List of len(series) + 1 temperatures (including the initial value).
@@ -153,12 +163,14 @@ class RCModel:
             raise ValueError("T_outdoor_series and Q_active_series must have the same length")
         solar = q_solar_series or [0.0] * len(T_outdoor_series)
         residual = q_residual_series or [0.0] * len(T_outdoor_series)
+        occupancy = q_occupancy_series or [0.0] * len(T_outdoor_series)
         trajectory = [T_room]
         T = T_room
         for i, (T_out, Q) in enumerate(zip(T_outdoor_series, Q_active_series, strict=False)):
             qs = solar[i] if i < len(solar) else 0.0
             qr = residual[i] if i < len(residual) else 0.0
-            T = self.predict(T, T_out, Q, dt_minutes, q_solar=qs, q_residual=qr)
+            qo = occupancy[i] if i < len(occupancy) else 0.0
+            T = self.predict(T, T_out, Q, dt_minutes, q_solar=qs, q_residual=qr, q_occupancy=qo)
             trajectory.append(T)
         return trajectory
 
@@ -170,6 +182,7 @@ class RCModel:
             "Q_heat": self.Q_heat,
             "Q_cool": self.Q_cool,
             "Q_solar": self.Q_solar,
+            "Q_occupancy": self.Q_occupancy,
         }
 
     @classmethod
@@ -181,13 +194,14 @@ class RCModel:
             Q_heat=max(0.0, data.get("Q_heat", cls.DEFAULT_Q_HEAT)),
             Q_cool=max(0.0, data.get("Q_cool", cls.DEFAULT_Q_COOL)),
             Q_solar=max(0.0, data.get("Q_solar", cls.DEFAULT_Q_SOLAR)),
+            Q_occupancy=max(0.0, data.get("Q_occupancy", cls.DEFAULT_Q_OCCUPANCY)),
         )
 
     def __repr__(self) -> str:
         return (
             f"RCModel(C={self.C:.2f}, U={self.U:.2f}, "
             f"Q_heat={self.Q_heat:.0f}, Q_cool={self.Q_cool:.0f}, "
-            f"Q_solar={self.Q_solar:.1f})"
+            f"Q_solar={self.Q_solar:.1f}, Q_occupancy={self.Q_occupancy:.1f})"
         )
 
 
@@ -199,11 +213,13 @@ class RCModel:
 class ThermalEKF:
     """Extended Kalman Filter for 1R1C thermal model.
 
-    Augmented state vector x = [T, alpha, beta_h, beta_c] where:
+    Augmented state vector x = [T, alpha, beta_h, beta_c, beta_s, beta_o] where:
       T       = room temperature [degC]  (directly measured)
       alpha   = U/C  heat loss rate [1/h]
       beta_h  = Q_heat/C  heating rate [degC/h]
       beta_c  = Q_cool/C  cooling rate [degC/h]
+      beta_s  = Q_solar/C  solar gain rate [degC/h per kW/m²]
+      beta_o  = Q_occupancy/C  occupancy heat gain rate [degC/h]
 
     The EKF uses the analytical 1R1C solution for the predict step and
     a standard Kalman measurement update.  Parameters are modeled as
@@ -238,12 +254,15 @@ class ThermalEKF:
     _BETA_C_MAX: float = 300.0
     _BETA_S_MIN: float = 0.0  # interior rooms / north-facing → 0
     _BETA_S_MAX: float = 50.0  # large south-facing sunroom
+    _BETA_O_MIN: float = 0.0  # no occupancy gain
+    _BETA_O_MAX: float = 20.0  # large occupancy gain (many people / small room)
 
     # Default initial parameter values (C=1 normalization)
     _DEFAULT_ALPHA: float = 0.15  # ~7 h time constant (moderate residential room)
     _DEFAULT_BETA_H: float = 3.0  # moderate heater: T_eq = T_out + 20°C
     _DEFAULT_BETA_C: float = 4.0  # moderate AC
     _DEFAULT_BETA_S: float = 0.5  # small initial solar gain; learns from data
+    _DEFAULT_BETA_O: float = 0.3  # ~100W body heat, C=1 normalized
 
     # Process noise (diagonal of Q_noise matrix)
     # Higher values keep the filter adaptive; lower values freeze parameters.
@@ -254,6 +273,7 @@ class ThermalEKF:
     _Q_BETA_H: float = 0.005  # HVAC power drift (5x previous)
     _Q_BETA_C: float = 0.005  # HVAC power drift (5x previous)
     _Q_BETA_S: float = 0.002  # solar gain drift
+    _Q_BETA_O: float = 0.002  # occupancy gain drift
 
     # Measurement noise
     _R: float = 0.04  # sensor noise variance (0.2 degC std)
@@ -264,6 +284,7 @@ class ThermalEKF:
     _P_INIT_ALPHA: float = 0.5  # σ≈0.7 around default 0.15
     _P_INIT_BETA: float = 50.0  # σ≈7 around default 3.0
     _P_INIT_BETA_S: float = 25.0  # σ≈5 around default 0.5
+    _P_INIT_BETA_O: float = 10.0  # moderate initial uncertainty for occupancy
 
     # Window-open heat exchange multiplier
     _K_WINDOW_DEFAULT: float = 5.0  # initial: 5x faster than closed
@@ -274,7 +295,7 @@ class ThermalEKF:
     _K_WINDOW_MIN_DELTA_T: float = 0.1  # min |T_outdoor - T_room| for learning
 
     # Number of state dimensions
-    _N: int = 5
+    _N: int = 6
 
     def __init__(self, T_init: float = 20.0) -> None:
         self._x: list[float] = [
@@ -283,13 +304,15 @@ class ThermalEKF:
             self._DEFAULT_BETA_H,
             self._DEFAULT_BETA_C,
             self._DEFAULT_BETA_S,
+            self._DEFAULT_BETA_O,
         ]
         self._P: list[list[float]] = [
-            [self._P_INIT_T, 0.0, 0.0, 0.0, 0.0],
-            [0.0, self._P_INIT_ALPHA, 0.0, 0.0, 0.0],
-            [0.0, 0.0, self._P_INIT_BETA, 0.0, 0.0],
-            [0.0, 0.0, 0.0, self._P_INIT_BETA, 0.0],
-            [0.0, 0.0, 0.0, 0.0, self._P_INIT_BETA_S],
+            [self._P_INIT_T, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, self._P_INIT_ALPHA, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, self._P_INIT_BETA, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, self._P_INIT_BETA, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, self._P_INIT_BETA_S, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, self._P_INIT_BETA_O],
         ]
         self._n_updates: int = 0
         self._n_heating: int = 0
@@ -386,6 +409,7 @@ class ThermalEKF:
         *,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> float:
         """Prediction uncertainty in degC for a given operating point.
 
@@ -404,7 +428,17 @@ class ThermalEKF:
         dt_h = dt_minutes / 60.0
         alpha = self._x[1]
         u = self._mode_to_u(mode)
-        F = self._compute_jacobian(T_room, alpha, u, T_outdoor, dt_h, mode, q_solar=q_solar, q_residual=q_residual)
+        F = self._compute_jacobian(
+            T_room,
+            alpha,
+            u,
+            T_outdoor,
+            dt_h,
+            mode,
+            q_solar=q_solar,
+            q_residual=q_residual,
+            q_occupancy=q_occupancy,
+        )
 
         # P_pred = F @ P @ F^T + Q_noise (only need element [0][0])
         # Compute F[0,:] @ P
@@ -492,6 +526,7 @@ class ThermalEKF:
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> None:
         """Run one full EKF cycle: predict then update with measurement.
 
@@ -503,6 +538,7 @@ class ThermalEKF:
             power_fraction: fraction of max heating/cooling power applied (0-1).
             q_solar: normalized solar irradiance (GHI/1000, 0–1).
             q_residual: residual heat fraction from thermal mass (0–1).
+            q_occupancy: occupancy signal (0 = unoccupied, 1 = occupied).
         """
         if dt_minutes <= 0:
             return
@@ -520,7 +556,13 @@ class ThermalEKF:
 
         # --- Predict step ---
         self._predict_step(
-            T_outdoor, predict_mode, dt_h, power_fraction=power_fraction, q_solar=q_solar, q_residual=q_residual
+            T_outdoor,
+            predict_mode,
+            dt_h,
+            power_fraction=power_fraction,
+            q_solar=q_solar,
+            q_residual=q_residual,
+            q_occupancy=q_occupancy,
         )
 
         # --- Update step ---
@@ -555,6 +597,7 @@ class ThermalEKF:
             Q_heat=max(self._x[2], 0.0),
             Q_cool=max(self._x[3], 0.0),
             Q_solar=max(self._x[4], 0.0),
+            Q_occupancy=max(self._x[5], 0.0),
         )
 
     # -- EKF internals -------------------------------------------------------
@@ -591,15 +634,17 @@ class ThermalEKF:
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> list[list[float]]:
-        """Compute the 5x5 Jacobian of the state transition.
+        """Compute the 6x6 Jacobian of the state transition.
 
         F[0][0] = dT_new/dT
         F[0][1] = dT_new/d_alpha
         F[0][2] = dT_new/d_beta_h  (nonzero during heating, or idle with residual)
         F[0][3] = dT_new/d_beta_c  (nonzero only during cooling)
         F[0][4] = dT_new/d_beta_s  (nonzero only when q_solar > 0)
-        F[1..4][1..4] = I           (parameters are random walk)
+        F[0][5] = dT_new/d_beta_o  (nonzero only when q_occupancy > 0)
+        F[1..5][1..5] = I           (parameters are random walk)
         """
         N = self._N
         F: list[list[float]] = [[0.0] * N for _ in range(N)]
@@ -608,6 +653,7 @@ class ThermalEKF:
         F[2][2] = 1.0
         F[3][3] = 1.0
         F[4][4] = 1.0
+        F[5][5] = 1.0
 
         if abs(alpha) < self._ALPHA_SMALL:
             # Linearized (Euler) Jacobian
@@ -621,6 +667,8 @@ class ThermalEKF:
                 F[0][2] = q_residual * dt_h
             # Solar: dT_new/d_beta_s = q_solar * dt_h
             F[0][4] = q_solar * dt_h
+            # Occupancy: dT_new/d_beta_o = q_occupancy * dt_h
+            F[0][5] = q_occupancy * dt_h
         else:
             decay = math.exp(-alpha * dt_h)
             one_minus_decay = 1.0 - decay
@@ -635,6 +683,8 @@ class ThermalEKF:
                 F[0][2] = q_residual * (1.0 / alpha) * one_minus_decay
             # Solar: dT_new/d_beta_s = q_solar * (1/alpha) * (1 - exp(-alpha*dt))
             F[0][4] = q_solar * (1.0 / alpha) * one_minus_decay
+            # Occupancy: dT_new/d_beta_o = q_occupancy * (1/alpha) * (1 - exp(-alpha*dt))
+            F[0][5] = q_occupancy * (1.0 / alpha) * one_minus_decay
         return F
 
     def _predict_step(
@@ -646,21 +696,32 @@ class ThermalEKF:
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> None:
         """EKF predict: propagate state and covariance forward."""
-        T, alpha, beta_h, beta_c, beta_s = self._x
+        T, alpha, beta_h, beta_c, beta_s, beta_o = self._x
         u_hvac = self._mode_to_u(mode) * power_fraction
         # Residual heat: during idle, thermal mass continues releasing stored energy
         u_residual = beta_h * q_residual if mode == "idle" and q_residual > 0 else 0.0
-        u = u_hvac + beta_s * q_solar + u_residual
+        # Occupancy heat: always additive (not mode-gated)
+        u = u_hvac + beta_s * q_solar + beta_o * q_occupancy + u_residual
 
         # State prediction (analytical or linearized)
         T_new = self._state_transition(T, alpha, u, T_outdoor, dt_h)
-        self._x = [T_new, alpha, beta_h, beta_c, beta_s]
+        self._x = [T_new, alpha, beta_h, beta_c, beta_s, beta_o]
 
         # Jacobian at current state
         F = self._compute_jacobian(
-            T, alpha, u, T_outdoor, dt_h, mode, power_fraction=power_fraction, q_solar=q_solar, q_residual=q_residual
+            T,
+            alpha,
+            u,
+            T_outdoor,
+            dt_h,
+            mode,
+            power_fraction=power_fraction,
+            q_solar=q_solar,
+            q_residual=q_residual,
+            q_occupancy=q_occupancy,
         )
 
         # Covariance prediction: P = F @ P @ F^T + Q_noise
@@ -680,6 +741,7 @@ class ThermalEKF:
             self._Q_BETA_H if (mode == "heating" or (mode == "idle" and q_residual > 0)) else 0.0,
             self._Q_BETA_C if mode == "cooling" else 0.0,
             self._Q_BETA_S if q_solar > 0 else 0.0,
+            self._Q_BETA_O if q_occupancy > 0 else 0.0,
         ]
 
         # FP = F @ P
@@ -698,7 +760,7 @@ class ThermalEKF:
     def _update_step(self, T_measured: float) -> None:
         """EKF update: correct state with measurement.
 
-        Measurement model: H = [1, 0, 0, 0], so y = T_measured.
+        Measurement model: H = [1, 0, 0, 0, 0, 0], so y = T_measured.
         """
         N = self._N
         P = self._P
@@ -734,7 +796,7 @@ class ThermalEKF:
             self._x[i] += K[i] * innovation
 
         # Covariance update: P = (I - K @ H) @ P
-        # Since H = [1, 0, 0, 0]:  P_new[i][j] = P[i][j] - K[i] * P[0][j]
+        # Since H = [1, 0, 0, 0, 0, 0]:  P_new[i][j] = P[i][j] - K[i] * P[0][j]
         P_new = [[P[i][j] - K[i] * P[0][j] for j in range(N)] for i in range(N)]
 
         # Add K * R_eff * K^T for numerical stability (Joseph-form correction)
@@ -750,6 +812,7 @@ class ThermalEKF:
         self._x[2] = max(self._BETA_H_MIN, min(self._BETA_H_MAX, self._x[2]))
         self._x[3] = max(self._BETA_C_MIN, min(self._BETA_C_MAX, self._x[3]))
         self._x[4] = max(self._BETA_S_MIN, min(self._BETA_S_MAX, self._x[4]))
+        self._x[5] = max(self._BETA_O_MIN, min(self._BETA_O_MAX, self._x[5]))
 
     def _enforce_psd(self) -> None:
         """Enforce symmetry and positive semi-definiteness of P."""
@@ -771,7 +834,7 @@ class ThermalEKF:
     def to_dict(self) -> dict:
         """Serialize EKF state for persistence."""
         return {
-            "ekf_version": 3,
+            "ekf_version": 4,
             "x": list(self._x),
             "P": [list(row) for row in self._P],
             "n_updates": self._n_updates,
@@ -798,6 +861,7 @@ class ThermalEKF:
             self._P_INIT_BETA,
             self._P_INIT_BETA,
             self._P_INIT_BETA_S,
+            self._P_INIT_BETA_O,
         ]
         for i in range(self._N):
             for j in range(self._N):
@@ -813,10 +877,17 @@ class ThermalEKF:
         """Restore EKF from persisted data."""
         ekf = cls()
 
-        if "x" in data and len(data["x"]) == 5:
-            ekf._x = list(data["x"])
-        if "P" in data and len(data["P"]) == 5:
-            ekf._P = [list(row) for row in data["P"]]
+        if "x" in data:
+            if len(data["x"]) == 6:
+                ekf._x = list(data["x"])
+            elif len(data["x"]) == 5:
+                ekf._x = list(data["x"]) + [cls._DEFAULT_BETA_O]
+        if "P" in data:
+            if len(data["P"]) == 6:
+                ekf._P = [list(row) for row in data["P"]]
+            elif len(data["P"]) == 5:
+                ekf._P = [list(row) + [0.0] for row in data["P"]]
+                ekf._P.append([0.0] * 5 + [cls._P_INIT_BETA_O])
 
         ekf._n_updates = data.get("n_updates", 0)
         ekf._n_heating = data.get("n_heating", 0)
@@ -836,7 +907,7 @@ class ThermalEKF:
         return (
             f"ThermalEKF(T={self._x[0]:.1f}, alpha={self._x[1]:.2f}, "
             f"beta_h={self._x[2]:.1f}, beta_c={self._x[3]:.1f}, "
-            f"beta_s={self._x[4]:.1f}, "
+            f"beta_s={self._x[4]:.1f}, beta_o={self._x[5]:.1f}, "
             f"confidence={self.confidence:.2f}, n={self._n_updates})"
         )
 
@@ -875,12 +946,20 @@ class RoomModelManager:
         power_fraction: float = 1.0,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> None:
         """Feed an observed transition to the room's estimator."""
         est = self.get_estimator(area_id)
         est.set_applicable_modes(can_heat, can_cool)
         est.update(
-            T_new, T_outdoor, mode, dt_minutes, power_fraction=power_fraction, q_solar=q_solar, q_residual=q_residual
+            T_new,
+            T_outdoor,
+            mode,
+            dt_minutes,
+            power_fraction=power_fraction,
+            q_solar=q_solar,
+            q_residual=q_residual,
+            q_occupancy=q_occupancy,
         )
 
     def predict(
@@ -914,12 +993,19 @@ class RoomModelManager:
         *,
         q_solar: float = 0.0,
         q_residual: float = 0.0,
+        q_occupancy: float = 0.0,
     ) -> float:
         """Return prediction uncertainty in degC for *area_id* at given conditions."""
         if area_id not in self._estimators:
             return float("inf")
         return self._estimators[area_id].prediction_std(
-            Q_active, T_room, T_outdoor, dt_minutes, q_solar=q_solar, q_residual=q_residual
+            Q_active,
+            T_room,
+            T_outdoor,
+            dt_minutes,
+            q_solar=q_solar,
+            q_residual=q_residual,
+            q_occupancy=q_occupancy,
         )
 
     def get_mode_counts(self, area_id: str) -> tuple[int, int, int]:

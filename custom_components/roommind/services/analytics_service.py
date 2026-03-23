@@ -318,6 +318,13 @@ async def build_analytics_data(
 
                     sim_q_residual = compute_residual_heat(elapsed, system_type, sim_last_pf, sim_heat_dur)
 
+                sim_q_occupancy = 0.0
+                for occ_eid in room_config.get("occupancy_sensors", []):
+                    occ_state = hass.states.get(occ_eid)
+                    if occ_state and occ_state.state == "on":
+                        sim_q_occupancy = 1.0
+                        break
+
                 pred_temps = cast(
                     list[float | None],
                     simulate_prediction(
@@ -337,6 +344,7 @@ async def build_analytics_data(
                         heating_system_type=system_type,
                         heating_duration_minutes=sim_heat_dur,
                         last_power_fraction=sim_last_pf,
+                        q_occupancy=sim_q_occupancy,
                     ),
                 )
 

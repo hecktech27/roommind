@@ -515,6 +515,7 @@ class MPCController:
         heating_system_type: str = "",
         mode_on_since: float | None = None,
         shading_factor: float = 1.0,
+        q_occupancy: float = 0.0,
     ) -> None:
         self.hass = hass
         self.room_config = room_config
@@ -539,6 +540,7 @@ class MPCController:
         self._heating_system_type = heating_system_type
         self._mode_on_since = mode_on_since
         self._shading_factor = shading_factor
+        self.q_occupancy = q_occupancy
         self._idle_targets: TargetTemps | None = None
 
         s = settings or {}
@@ -591,6 +593,7 @@ class MPCController:
             PLAN_DT_MINUTES,
             q_solar=self.q_solar,
             q_residual=self.q_residual,
+            q_occupancy=self.q_occupancy,
         )
         if pred_std < MPC_MAX_PREDICTION_STD and self._has_enough_data(can_heat, can_cool):
             return self._evaluate_mpc(current_temp, targets)
@@ -646,6 +649,9 @@ class MPCController:
         # Build residual heat series (decaying from current q_residual)
         residual_series = self._build_residual_series(horizon_blocks)
 
+        # Build occupancy heat series (constant over horizon)
+        occupancy_series = [self.q_occupancy] * horizon_blocks
+
         # Build dual target series with schedule lookahead for pre-heating/pre-cooling.
         # None values (from "off" action) are replaced with current_temp so the
         # optimizer sees "no deviation needed = idle optimal".
@@ -692,6 +698,7 @@ class MPCController:
             dt_minutes=PLAN_DT_MINUTES,
             solar_series=solar_series,
             residual_series=residual_series,
+            occupancy_series=occupancy_series,
         )
         self.last_plan = plan
 

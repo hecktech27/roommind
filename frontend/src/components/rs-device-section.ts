@@ -14,6 +14,7 @@ export class RsDeviceSection extends LitElement {
   @property({ attribute: false }) public devices: DeviceConfig[] = [];
   @property({ type: String }) public selectedTempSensor = "";
   @property({ type: String }) public selectedHumiditySensor = "";
+  @property({ attribute: false }) public selectedOccupancySensors: Set<string> = new Set();
   @property({ attribute: false }) public selectedWindowSensors: Set<string> = new Set();
   @property({ type: Number }) public windowOpenDelay = 0;
   @property({ type: Number }) public windowCloseDelay = 0;
@@ -354,6 +355,7 @@ export class RsDeviceSection extends LitElement {
     const hasClimate = this._selectedThermostats.size > 0 || this._selectedCoolingDevices.size > 0;
     const hasTempSensor = !!this.selectedTempSensor;
     const hasHumiditySensor = !!this.selectedHumiditySensor;
+    const hasOccupancySensors = this.selectedOccupancySensors.size > 0;
 
     return html`
       ${hasClimate
@@ -384,6 +386,16 @@ export class RsDeviceSection extends LitElement {
                 ${localize("devices.humidity_sensors", this.hass.language)}
               </div>
               ${this._renderViewRow(this.selectedHumiditySensor, "humidity")}
+            </div>
+          `
+        : nothing}
+      ${hasOccupancySensors
+        ? html`
+            <div class="device-group">
+              <div class="section-subtitle">
+                ${localize("devices.occupancy_sensors", this.hass.language)}
+              </div>
+              ${[...this.selectedOccupancySensors].map((id) => this._renderOccupancyViewRow(id))}
             </div>
           `
         : nothing}
@@ -514,6 +526,26 @@ export class RsDeviceSection extends LitElement {
     `;
   }
 
+  private _renderOccupancyViewRow(entityId: string) {
+    const entityState = this.hass.states[entityId];
+    const friendlyName = (entityState?.attributes?.friendly_name as string) || entityId;
+    const isOn = entityState?.state === "on";
+
+    return html`
+      <div class="view-row">
+        <span class="view-name entity-link" @click=${() => openEntityInfo(this, entityId)}
+          >${friendlyName}</span
+        >
+        <span
+          class="view-value"
+          style="color: ${isOn ? "var(--primary-color)" : "var(--secondary-text-color)"}"
+        >
+          ${isOn ? "\u25CF" : "\u25CB"}
+        </span>
+      </div>
+    `;
+  }
+
   private _renderEditMode() {
     // Fetch all area entities once, then filter by category
     // Exclude RoomMind's own entities to prevent self-assignment (#86)
@@ -556,6 +588,17 @@ export class RsDeviceSection extends LitElement {
         )
       : [];
 
+    const areaOccupancySensors = this.hass?.states
+      ? allAreaEntities.filter(
+          (e) =>
+            (e.entity_id.startsWith("binary_sensor.") &&
+              ["occupancy", "motion", "presence"].includes(
+                this.hass.states[e.entity_id]?.attributes?.device_class as string,
+              )) ||
+            e.entity_id.startsWith("input_boolean."),
+        )
+      : [];
+
     // Find selected entities not in this area (manually added)
     const areaClimateIds = new Set(areaClimateEntities.map((e) => e.entity_id));
     const allSelectedClimate = new Set(this.devices.map((d) => d.entity_id));
@@ -576,6 +619,11 @@ export class RsDeviceSection extends LitElement {
     const areaWindowIds = new Set(areaWindowSensors.map((e) => e.entity_id));
     const externalWindowSensors = [...this.selectedWindowSensors].filter(
       (id) => !areaWindowIds.has(id),
+    );
+
+    const areaOccupancyIds = new Set(areaOccupancySensors.map((e) => e.entity_id));
+    const externalOccupancySensors = [...this.selectedOccupancySensors].filter(
+      (id) => !areaOccupancyIds.has(id),
     );
 
     return html`
@@ -669,10 +717,26 @@ export class RsDeviceSection extends LitElement {
           : nothing}
       </div>
 
+      <div class="device-group">
+        <div class="section-subtitle">
+          ${localize("devices.occupancy_sensors", this.hass.language)}
+        </div>
+        <div class="device-list-scroll">
+          ${areaOccupancySensors.length > 0
+            ? areaOccupancySensors.map((entity) =>
+                this._renderOccupancyRow(entity.entity_id, false),
+              )
+            : html`<div class="no-devices">
+                ${localize("devices.no_occupancy_sensors", this.hass.language)}
+              </div>`}
+          ${externalOccupancySensors.map((id) => this._renderOccupancyRow(id, true))}
+        </div>
+      </div>
+
       <div class="entity-picker-wrap">
         <ha-entity-picker
           .hass=${this.hass}
-          .includeDomains=${["climate", "sensor", "binary_sensor", "input_number"]}
+          .includeDomains=${["climate", "sensor", "binary_sensor", "input_boolean", "input_number"]}
           .entityFilter=${this._entityFilter}
           .value=${""}
           label=${localize("devices.add_entity", this.hass.language)}
@@ -1015,6 +1079,42 @@ export class RsDeviceSection extends LitElement {
     `;
   }
 
+  private _renderOccupancyRow(entityId: string, external: boolean) {
+    const isSelected = this.selectedOccupancySensors.has(entityId);
+    const entityState = this.hass.states[entityId];
+    const friendlyName = (entityState?.attributes?.friendly_name as string) || entityId;
+    const isOn = entityState?.state === "on";
+
+    return html`
+      <div class="device-row ${isSelected ? "selected" : ""}">
+        <ha-checkbox
+          .checked=${isSelected}
+          @change=${(e: Event) => {
+            const target = e.target as HTMLElement & { checked: boolean };
+            this._onOccupancySensorToggle(entityId, target.checked);
+          }}
+        ></ha-checkbox>
+        <div class="device-info">
+          <div class="device-name-row">
+            <span class="device-name">${friendlyName}</span>
+            ${external
+              ? html`<span class="external-badge"
+                  >${localize("devices.other_area", this.hass.language)}</span
+                >`
+              : nothing}
+          </div>
+          <div class="device-entity">${entityId}</div>
+        </div>
+        <span
+          class="device-value"
+          style="color: ${isOn ? "var(--primary-color)" : "var(--secondary-text-color)"}"
+        >
+          ${isOn ? "\u25CF" : "\u25CB"}
+        </span>
+      </div>
+    `;
+  }
+
   // ---- Event handlers ----
 
   private _detectClimateType(entityId: string): "thermostat" | "ac" {
@@ -1058,6 +1158,16 @@ export class RsDeviceSection extends LitElement {
     this.dispatchEvent(
       new CustomEvent("sensor-selected", {
         detail: { entityId, type },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _onOccupancySensorToggle(entityId: string, checked: boolean) {
+    this.dispatchEvent(
+      new CustomEvent("occupancy-sensor-toggle", {
+        detail: { entityId, checked },
         bubbles: true,
         composed: true,
       }),
@@ -1161,6 +1271,7 @@ export class RsDeviceSection extends LitElement {
     if (this.devices.some((d) => d.entity_id === id)) return false;
     if (this.selectedTempSensor === id) return false;
     if (this.selectedHumiditySensor === id) return false;
+    if (this.selectedOccupancySensors.has(id)) return false;
     if (this.selectedWindowSensors.has(id)) return false;
     // For sensors, only show temperature and humidity
     if (id.startsWith("sensor.")) {
@@ -1169,9 +1280,17 @@ export class RsDeviceSection extends LitElement {
     }
     if (id.startsWith("binary_sensor.")) {
       const dc = this.hass.states[id]?.attributes?.device_class;
-      if (dc !== "window" && dc !== "door" && dc !== "opening") return false;
+      if (
+        dc !== "window" &&
+        dc !== "door" &&
+        dc !== "opening" &&
+        dc !== "occupancy" &&
+        dc !== "motion" &&
+        dc !== "presence"
+      )
+        return false;
     }
-    // input_number: allow all (no device_class filtering)
+    // input_number, input_boolean: allow all (no device_class filtering)
     return true;
   };
 
@@ -1180,11 +1299,18 @@ export class RsDeviceSection extends LitElement {
     if (!entityId) return;
 
     // Auto-categorize based on domain and device_class
-    let category: "climate" | "temp" | "humidity" | "window";
+    let category: "climate" | "temp" | "humidity" | "window" | "occupancy";
     if (entityId.startsWith("climate.")) {
       category = "climate";
+    } else if (entityId.startsWith("input_boolean.")) {
+      category = "occupancy";
     } else if (entityId.startsWith("binary_sensor.")) {
-      category = "window";
+      const dc = this.hass.states[entityId]?.attributes?.device_class;
+      if (dc === "occupancy" || dc === "motion" || dc === "presence") {
+        category = "occupancy";
+      } else {
+        category = "window";
+      }
     } else if (entityId.startsWith("input_number.")) {
       const uom = this.hass.states[entityId]?.attributes?.unit_of_measurement;
       category = uom === "%" ? "humidity" : "temp";
@@ -1199,6 +1325,14 @@ export class RsDeviceSection extends LitElement {
       const newDevices = [...this.devices, { entity_id: entityId, type, role: "auto" as const }];
       this._fireDeviceChanged(newDevices);
       // Clear the picker value
+      const picker = e.target as HTMLElement & { value: string };
+      picker.value = "";
+      return;
+    }
+
+    // For occupancy sensors, dispatch via toggle event (add)
+    if (category === "occupancy") {
+      this._onOccupancySensorToggle(entityId, true);
       const picker = e.target as HTMLElement & { value: string };
       picker.value = "";
       return;

@@ -107,6 +107,7 @@ def simulate_prediction(
     heating_system_type: str = "",
     heating_duration_minutes: float = 0.0,
     last_power_fraction: float = 1.0,
+    q_occupancy: float = 0.0,
 ) -> list[float]:
     """Simulate temperature prediction for the analytics chart.
 
@@ -132,6 +133,7 @@ def simulate_prediction(
             heating_system_type=heating_system_type,
             heating_duration_minutes=heating_duration_minutes,
             last_power_fraction=last_power_fraction,
+            q_occupancy=q_occupancy,
         )
 
     return _simulate_bangbang(
@@ -147,6 +149,7 @@ def simulate_prediction(
         heating_system_type=heating_system_type,
         heating_duration_minutes=heating_duration_minutes,
         last_power_fraction=last_power_fraction,
+        q_occupancy=q_occupancy,
     )
 
 
@@ -182,6 +185,7 @@ def _simulate_mpc(
     heating_system_type: str = "",
     heating_duration_minutes: float = 0.0,
     last_power_fraction: float = 1.0,
+    q_occupancy: float = 0.0,
 ) -> list[float]:
     """Rolling-horizon MPC simulation matching the real controller."""
     ocm = settings.get("outdoor_cooling_min", DEFAULT_OUTDOOR_COOLING_MIN)
@@ -255,6 +259,7 @@ def _simulate_mpc(
                     last_power_fraction,
                     sim_heating_blocks * 5.0 if sim_was_heating else heating_duration_minutes,
                 )
+            remaining_occupancy = [q_occupancy] * len(remaining_outdoor)
             plan = optimizer.optimize(
                 T_room=T,
                 T_outdoor_series=remaining_outdoor,
@@ -263,6 +268,7 @@ def _simulate_mpc(
                 dt_minutes=5.0,
                 solar_series=remaining_solar,
                 residual_series=remaining_residual,
+                occupancy_series=remaining_occupancy,
             )
             action = plan.get_current_action()
             pf = plan.get_current_power_fraction()
@@ -280,6 +286,7 @@ def _simulate_mpc(
             5.0,
             q_solar=qs,
             q_residual=current_q_residual if Q == 0.0 else 0.0,
+            q_occupancy=q_occupancy,
         )
         T = max(5.0, min(40.0, T_new))
 
@@ -329,6 +336,7 @@ def _simulate_bangbang(
     heating_system_type: str = "",
     heating_duration_minutes: float = 0.0,
     last_power_fraction: float = 1.0,
+    q_occupancy: float = 0.0,
 ) -> list[float]:
     """Bang-bang fallback simulation with mode stickiness + idle rate cap."""
     observed_idle_rate = compute_observed_idle_rate(all_points)
@@ -388,6 +396,7 @@ def _simulate_bangbang(
             5.0,
             q_solar=qs,
             q_residual=current_q_residual if Q == 0.0 else 0.0,
+            q_occupancy=q_occupancy,
         )
         if Q == 0.0 and observed_idle_rate is not None:
             model_delta = T_new - T

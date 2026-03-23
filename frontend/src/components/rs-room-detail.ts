@@ -39,6 +39,7 @@ export class RsRoomDetail extends LitElement {
   @state() private _devices: DeviceConfig[] = [];
   @state() private _selectedTempSensor = "";
   @state() private _selectedHumiditySensor = "";
+  @state() private _selectedOccupancySensors: Set<string> = new Set();
   @state() private _selectedWindowSensors: Set<string> = new Set();
   @state() private _windowOpenDelay = 0;
   @state() private _windowCloseDelay = 0;
@@ -219,6 +220,7 @@ export class RsRoomDetail extends LitElement {
       }
       this._selectedTempSensor = this.config.temperature_sensor;
       this._selectedHumiditySensor = this.config.humidity_sensor ?? "";
+      this._selectedOccupancySensors = new Set(this.config.occupancy_sensors ?? []);
       this._selectedWindowSensors = new Set(this.config.window_sensors ?? []);
       this._windowOpenDelay = this.config.window_open_delay ?? 0;
       this._windowCloseDelay = this.config.window_close_delay ?? 0;
@@ -252,6 +254,7 @@ export class RsRoomDetail extends LitElement {
       this._devices = [];
       this._selectedTempSensor = "";
       this._selectedHumiditySensor = "";
+      this._selectedOccupancySensors = new Set();
       this._selectedWindowSensors = new Set();
       this._windowOpenDelay = 0;
       this._windowCloseDelay = 0;
@@ -440,6 +443,7 @@ export class RsRoomDetail extends LitElement {
                     .devices=${this._devices}
                     .selectedTempSensor=${this._selectedTempSensor}
                     .selectedHumiditySensor=${this._selectedHumiditySensor}
+                    .selectedOccupancySensors=${this._selectedOccupancySensors}
                     .selectedWindowSensors=${this._selectedWindowSensors}
                     .windowOpenDelay=${this._windowOpenDelay}
                     .windowCloseDelay=${this._windowCloseDelay}
@@ -447,6 +451,7 @@ export class RsRoomDetail extends LitElement {
                     .valveProtectionEnabled=${this.valveProtectionEnabled}
                     @device-changed=${this._onDeviceChanged}
                     @sensor-selected=${this._onSensorSelected}
+                    @occupancy-sensor-toggle=${this._onOccupancySensorToggle}
                     @window-sensor-toggle=${this._onWindowSensorToggle}
                     @window-open-delay-changed=${this._onWindowOpenDelayChanged}
                     @window-close-delay-changed=${this._onWindowCloseDelayChanged}
@@ -645,6 +650,18 @@ export class RsRoomDetail extends LitElement {
     this._autoSave();
   }
 
+  private _onOccupancySensorToggle(e: CustomEvent<{ entityId: string; checked: boolean }>) {
+    const { entityId, checked } = e.detail;
+    const next = new Set(this._selectedOccupancySensors);
+    if (checked) {
+      next.add(entityId);
+    } else {
+      next.delete(entityId);
+    }
+    this._selectedOccupancySensors = next;
+    this._autoSave();
+  }
+
   private _onWindowSensorToggle(e: CustomEvent<{ entityId: string; checked: boolean }>) {
     const { entityId, checked } = e.detail;
     const next = new Set(this._selectedWindowSensors);
@@ -790,6 +807,7 @@ export class RsRoomDetail extends LitElement {
         devices: this._devices,
         temperature_sensor: this._selectedTempSensor,
         humidity_sensor: this._selectedHumiditySensor,
+        occupancy_sensors: [...this._selectedOccupancySensors],
         window_sensors: [...this._selectedWindowSensors],
         window_open_delay: this._windowOpenDelay,
         window_close_delay: this._windowCloseDelay,
