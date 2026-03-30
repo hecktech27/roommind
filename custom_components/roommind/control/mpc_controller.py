@@ -448,6 +448,7 @@ HORIZON_MULTIPLIER = 2.5
 DEFAULT_OUTDOOR_TEMP_FALLBACK = 10.0
 SAFETY_GUARD_MIN_BLOCKS = 6  # Minimum guard horizon (30 min floor)
 GUARD_PREDICTION_MARGIN = 0.2  # °C margin for prediction-based guard bypass
+HARD_OVERSHOOT_CEILING = 1.0  # °C — model-independent max overshoot before forced idle
 
 # Minimum sample counts before MPC is allowed.
 # Each EKF update covers ~3 min (EKF_UPDATE_MIN_DT), so these correspond
@@ -770,7 +771,34 @@ class MPCController:
         guard_horizon_minutes = guard_blocks * PLAN_DT_MINUTES
         near_heat = heat_target_series[:guard_blocks]
         near_cool = cool_target_series[:guard_blocks]
-        if near_heat and action == MODE_HEATING and current_temp >= max(near_heat):
+
+        # Hard ceiling: force idle when significantly past target, regardless
+        # of model predictions or min-run window.  Prevents runaway
+        # heating/cooling from a miscalibrated thermal model (#152).
+        if near_heat and action == MODE_HEATING and current_temp > max(near_heat) + HARD_OVERSHOOT_CEILING:
+            _LOGGER.info(
+                "Hard ceiling: suppressing HEATING for %s at %.1f°C (target max %.1f°C + %.1f°C ceiling)",
+                self._area_id,
+                current_temp,
+                max(near_heat),
+                HARD_OVERSHOOT_CEILING,
+            )
+            action = MODE_IDLE
+            power_fraction = 0.0
+        elif near_cool and action == MODE_COOLING and current_temp < min(near_cool) - HARD_OVERSHOOT_CEILING:
+            _LOGGER.info(
+                "Hard ceiling: suppressing COOLING for %s at %.1f°C (target min %.1f°C - %.1f°C ceiling)",
+                self._area_id,
+                current_temp,
+                min(near_cool),
+                HARD_OVERSHOOT_CEILING,
+            )
+            action = MODE_IDLE
+            power_fraction = 0.0
+
+        # Model-based guard: suppress when model predicts temp stays past
+        # target, but allow pre-heating/pre-cooling when a drift is predicted.
+        elif near_heat and action == MODE_HEATING and current_temp >= max(near_heat):
             predicted = self._predict_idle_drift(current_temp, guard_horizon_minutes)
             if predicted < min(near_heat) - GUARD_PREDICTION_MARGIN:
                 pass  # model predicts dip — allow optimizer's HEAT decision
