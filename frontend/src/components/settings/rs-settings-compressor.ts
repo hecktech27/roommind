@@ -3,7 +3,7 @@
  */
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { HomeAssistant, CompressorGroup } from "../../types";
+import type { HomeAssistant, CompressorGroup, ConflictResolution } from "../../types";
 import { localize } from "../../utils/localize";
 import "../shared/rs-confirm-button";
 
@@ -180,6 +180,68 @@ export class RsSettingsCompressor extends LitElement {
           </div>
         </div>
 
+        <div class="section-label">${localize("compressor.master_entity", l)}</div>
+        <ha-entity-picker
+          .hass=${this.hass}
+          .value=${group.master_entity || ""}
+          .includeDomains=${["climate"]}
+          .entityFilter=${this._masterFilter}
+          @value-changed=${(e: CustomEvent) => {
+            this._updateGroup(idx, "master_entity", (e.detail?.value as string) ?? "");
+          }}
+        ></ha-entity-picker>
+        <div class="field-hint">${localize("compressor.master_entity_hint", l)}</div>
+
+        ${group.master_entity
+          ? html`
+              <div class="field-row">
+                <ha-select
+                  .label=${localize("compressor.conflict_resolution", l)}
+                  .value=${group.conflict_resolution || "heating_priority"}
+                  .options=${[
+                    {
+                      value: "heating_priority",
+                      label: localize("compressor.conflict_heating_priority", l),
+                    },
+                    {
+                      value: "cooling_priority",
+                      label: localize("compressor.conflict_cooling_priority", l),
+                    },
+                    {
+                      value: "majority",
+                      label: localize("compressor.conflict_majority", l),
+                    },
+                    {
+                      value: "outdoor_temp",
+                      label: localize("compressor.conflict_outdoor_temp", l),
+                    },
+                  ]}
+                  @selected=${(e: Event) => {
+                    const v = (e.target as HTMLSelectElement).value;
+                    if (v) this._updateGroup(idx, "conflict_resolution", v);
+                  }}
+                  @closed=${(e: Event) => e.stopPropagation()}
+                  fixedMenuPosition
+                  style="width: 100%;"
+                >
+                </ha-select>
+                <div class="field-hint">${localize("compressor.conflict_resolution_hint", l)}</div>
+              </div>
+              <div class="field-row">
+                <ha-entity-picker
+                  .hass=${this.hass}
+                  .value=${group.action_script || ""}
+                  .includeDomains=${["script"]}
+                  .label=${localize("compressor.action_script", l)}
+                  @value-changed=${(e: CustomEvent) => {
+                    this._updateGroup(idx, "action_script", (e.detail?.value as string) ?? "");
+                  }}
+                ></ha-entity-picker>
+                <div class="field-hint">${localize("compressor.action_script_hint", l)}</div>
+              </div>
+            `
+          : nothing}
+
         <div class="delete-row">
           <rs-confirm-button
             .label=${localize("compressor.delete", l)}
@@ -228,6 +290,17 @@ export class RsSettingsCompressor extends LitElement {
     if (id.substring(id.indexOf(".") + 1).startsWith("roommind_")) return false;
     for (const g of this.compressorGroups) {
       if (g.members.includes(id)) return false;
+      if (g.master_entity === id) return false;
+    }
+    return true;
+  };
+
+  private _masterFilter = (entity: { entity_id: string }): boolean => {
+    const id = entity.entity_id;
+    if (id.substring(id.indexOf(".") + 1).startsWith("roommind_")) return false;
+    for (const g of this.compressorGroups) {
+      if (g.members.includes(id)) return false;
+      if (g.master_entity === id) return false;
     }
     return true;
   };
@@ -251,6 +324,9 @@ export class RsSettingsCompressor extends LitElement {
         members: [],
         min_run_minutes: 15,
         min_off_minutes: 5,
+        master_entity: "",
+        conflict_resolution: "heating_priority" as ConflictResolution,
+        action_script: "",
       },
     ]);
   }

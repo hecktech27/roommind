@@ -64,12 +64,21 @@ export interface DeviceConfig {
   setpoint_mode?: "proportional" | "direct"; // default "proportional"
 }
 
+export type ConflictResolution =
+  | "heating_priority"
+  | "cooling_priority"
+  | "majority"
+  | "outdoor_temp";
+
 export interface CompressorGroup {
   id: string;
   name: string;
   members: string[];
   min_run_minutes: number;
   min_off_minutes: number;
+  master_entity: string;
+  conflict_resolution: ConflictResolution;
+  action_script: string;
 }
 
 export interface RoomConfig {

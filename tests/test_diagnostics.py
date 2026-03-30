@@ -493,6 +493,44 @@ async def test_diagnostics_compressor_groups(hass, mock_config_entry):
 
 
 @pytest.mark.asyncio
+async def test_diagnostics_compressor_master_device(hass, mock_config_entry):
+    """Compressor group with master device includes master fields in diagnostics."""
+    store = MagicMock()
+    store.get_settings.return_value = {}
+    store.get_rooms.return_value = {}
+
+    now = time.time()
+    group_cfg = MagicMock()
+    group_cfg.min_run_seconds = 180
+    group_cfg.min_off_seconds = 300
+    group_cfg.master_entity = "climate.boiler"
+    group_cfg.conflict_resolution = "cooling_priority"
+    group_cfg.action_script = "script.boiler_control"
+
+    group_state = MagicMock()
+    group_state.active_members = {"climate.ac1"}
+    group_state.compressor_on_since = now - 60
+    group_state.compressor_off_since = None
+    group_state.master_action = "heating"
+    group_state.master_on_since = now - 45
+
+    coordinator = _make_coordinator(
+        compressor_groups={"g1": group_cfg},
+        compressor_states={"g1": group_state},
+    )
+    hass.data[DOMAIN] = {"store": store, "coordinator": coordinator}
+
+    result = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+
+    cg = result["compressor_groups"]["g1"]
+    assert cg["master_entity"] == "climate.boiler"
+    assert cg["master_action"] == "heating"
+    assert cg["conflict_resolution"] == "cooling_priority"
+    assert cg["action_script"] == "script.boiler_control"
+    assert 43 <= cg["master_on_for_s"] <= 47
+
+
+@pytest.mark.asyncio
 async def test_diagnostics_valve_protection(hass, mock_config_entry):
     """Valve protection state is included."""
     store = MagicMock()

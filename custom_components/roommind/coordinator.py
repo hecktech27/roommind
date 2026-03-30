@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_COMFORT_HEAT,
     DEFAULT_ECO_COOL,
     DEFAULT_ECO_HEAT,
+    DEFAULT_OUTDOOR_HEATING_MAX,
     DOMAIN,
     HEATING_BOOST_TARGET,
     HISTORY_ROTATE_CYCLES,
@@ -36,6 +37,7 @@ from .const import (
     VALVE_PROTECTION_CHECK_CYCLES,
     TargetTemps,
     build_override_live,
+    make_roommind_context,
 )
 from .control.mpc_controller import (
     MPCController,
@@ -44,7 +46,10 @@ from .control.mpc_controller import (
 )
 from .control.solar import compute_q_solar_norm
 from .control.thermal_model import RoomModelManager
-from .managers.compressor_group_manager import CompressorGroupManager
+from .managers.compressor_group_manager import (
+    CompressorGroupManager,
+    resolve_master_action,
+)
 from .managers.cover_orchestrator import CoverOrchestrator
 from .managers.ekf_training_manager import EkfTrainingManager
 from .managers.heat_source_orchestrator import HeatSourcePlan, evaluate_heat_sources
@@ -206,6 +211,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 room_states[area_id] = room_state
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Room '%s': processing failed, skipping", area_id)
+
+        # Control master devices based on aggregate room demand
+        await self._async_control_master_devices(room_states, rooms, settings)
 
         # Record to history store (throttled)
         learning_disabled = set(settings.get("learning_disabled_rooms", []))
@@ -1294,3 +1302,201 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         for eid in to_remove:
             _LOGGER.info("Removing orphaned entity: %s", eid)
             registry.async_remove(eid)
+
+    # ------------------------------------------------------------------
+    # Master device control
+    # ------------------------------------------------------------------
+
+    def _collect_member_room_modes(
+        self,
+        members: list[str],
+        room_states: dict[str, dict],
+        rooms_config: dict[str, dict],
+        settings: dict,
+    ) -> list[str]:
+        """Collect room modes for rooms containing group member devices."""
+        if not settings.get("climate_control_active", True):
+            return []
+        member_set = set(members)
+        modes: list[str] = []
+        for area_id, room in rooms_config.items():
+            if not room.get("climate_control_enabled", True):
+                continue
+            if room.get("is_outdoor", False):
+                continue
+            device_eids = {d.get("entity_id", "") for d in room.get("devices", [])}
+            if device_eids & member_set:
+                rs = room_states.get(area_id)
+                if rs:
+                    modes.append(rs.get("mode", MODE_IDLE))
+        return modes
+
+    def _resolve_master_hvac_mode(self, master_entity: str, action: str) -> str | None:
+        """Map action to supported hvac_mode for master entity. Returns None if unsupported."""
+        state = self.hass.states.get(master_entity)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return None
+        supported = state.attributes.get("hvac_modes", [])
+        if action == "idle":
+            if "off" in supported:
+                return "off"
+            _LOGGER.warning(
+                "Master '%s': 'off' not supported, cannot turn idle (available: %s)",
+                master_entity,
+                supported,
+            )
+            return None
+        if action in supported:
+            return action
+        if "heat_cool" in supported:
+            return "heat_cool"
+        if "auto" in supported:
+            return "auto"
+        _LOGGER.warning(
+            "Master '%s': mode '%s' not supported (available: %s)",
+            master_entity,
+            action,
+            supported,
+        )
+        return None
+
+    async def _async_control_master_devices(
+        self,
+        room_states: dict[str, dict],
+        rooms_config: dict[str, dict],
+        settings: dict,
+    ) -> None:
+        """Control master devices based on aggregate demand from member rooms."""
+        for gid, group in self._compressor_manager.get_groups().items():
+            if not group.master_entity:
+                continue
+            try:
+                # 1. Check master entity availability
+                master_state = self.hass.states.get(group.master_entity)
+                if master_state is None or master_state.state in (
+                    "unavailable",
+                    "unknown",
+                ):
+                    _LOGGER.warning(
+                        "Master '%s' (group '%s'): entity unavailable, skipping",
+                        group.master_entity,
+                        group.name,
+                    )
+                    continue
+
+                # 2. Collect member room modes
+                modes = self._collect_member_room_modes(
+                    group.members,
+                    room_states,
+                    rooms_config,
+                    settings,
+                )
+
+                # 3. Resolve desired action
+                new_action = resolve_master_action(
+                    modes,
+                    group.conflict_resolution,
+                    self.outdoor_temp,
+                    settings.get("outdoor_heating_max", DEFAULT_OUTDOOR_HEATING_MAX),
+                )
+
+                # 4. Min-run/min-off guard: prevent master short-cycling
+                if not self._compressor_manager.check_master_can_switch(gid, new_action):
+                    continue
+
+                # 5. Resolve HVAC mode
+                resolved_mode = self._resolve_master_hvac_mode(group.master_entity, new_action)
+
+                # 6. Skip when mode is unsupported — don't update state (K3)
+                if resolved_mode is None:
+                    if new_action != "idle":
+                        _LOGGER.warning(
+                            "Master '%s' (group '%s'): cannot resolve mode for action '%s', skipping",
+                            group.master_entity,
+                            group.name,
+                            new_action,
+                        )
+                    continue
+
+                # 7. Redundancy check — compare resolved mode with actual entity state
+                if master_state.state == resolved_mode:
+                    self._compressor_manager.set_master_action(gid, new_action)
+                    continue
+
+                # 8. Send climate command
+                try:
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_hvac_mode",
+                        {
+                            "entity_id": group.master_entity,
+                            "hvac_mode": resolved_mode,
+                        },
+                        blocking=True,
+                        context=make_roommind_context(),
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Master '%s' (group '%s'): failed to set hvac_mode '%s'",
+                        group.master_entity,
+                        group.name,
+                        resolved_mode,
+                        exc_info=True,
+                    )
+                    continue  # don't update state on failed command
+
+                # 9. Call action script on transition
+                state = self._compressor_manager.get_state(gid)
+                prev_action = state.master_action if state else None
+                if new_action != prev_action and group.action_script:
+                    script_state = self.hass.states.get(group.action_script)
+                    if script_state is None:
+                        _LOGGER.warning(
+                            "Master group '%s': action script '%s' not found",
+                            group.name,
+                            group.action_script,
+                        )
+                    else:
+                        try:
+                            await self.hass.services.async_call(
+                                "script",
+                                "turn_on",
+                                {
+                                    "entity_id": group.action_script,
+                                    "variables": {
+                                        "action": new_action,
+                                        "master_entity": group.master_entity,
+                                        "members": group.members,
+                                        "active_members": [
+                                            eid for eid in group.members if state and eid in state.active_members
+                                        ],
+                                    },
+                                },
+                                blocking=False,
+                                context=make_roommind_context(),
+                            )
+                        except Exception:  # noqa: BLE001
+                            _LOGGER.warning(
+                                "Master group '%s': action script '%s' failed",
+                                group.name,
+                                group.action_script,
+                                exc_info=True,
+                            )
+
+                # 10. Update state + log transition
+                if new_action != prev_action:
+                    _LOGGER.info(
+                        "Master '%s' (group '%s'): %s -> %s",
+                        group.master_entity,
+                        group.name,
+                        prev_action,
+                        new_action,
+                    )
+                self._compressor_manager.set_master_action(gid, new_action)
+
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Master device control failed for group '%s'",
+                    group.name,
+                    exc_info=True,
+                )

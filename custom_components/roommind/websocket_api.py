@@ -12,10 +12,12 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     CLIMATE_MODES,
+    CONFLICT_RESOLUTIONS,
     DEFAULT_COMFORT_COOL,
     DEFAULT_COMFORT_HEAT,
     DEFAULT_COMPRESSOR_MIN_OFF_MINUTES,
     DEFAULT_COMPRESSOR_MIN_RUN_MINUTES,
+    DEFAULT_CONFLICT_RESOLUTION,
     DEFAULT_ECO_COOL,
     DEFAULT_ECO_HEAT,
     DOMAIN,
@@ -584,6 +586,9 @@ async def websocket_get_settings(
                 vol.Optional("min_off_minutes", default=DEFAULT_COMPRESSOR_MIN_OFF_MINUTES): vol.All(
                     vol.Coerce(int), vol.Range(min=1, max=30)
                 ),
+                vol.Optional("master_entity", default=""): str,
+                vol.Optional("conflict_resolution", default=DEFAULT_CONFLICT_RESOLUTION): vol.In(CONFLICT_RESOLUTIONS),
+                vol.Optional("action_script", default=""): str,
             }
         ],
     }
@@ -628,6 +633,49 @@ async def websocket_save_settings(
                 msg["id"],
                 "duplicate_member",
                 "A climate entity cannot be in multiple compressor groups",
+            )
+            return
+
+        # Validate master_entity and action_script fields
+        all_masters: list[str] = []
+        for g in groups:
+            master = g.get("master_entity", "")
+            if master:
+                if not master.startswith("climate."):
+                    connection.send_error(
+                        msg["id"],
+                        "invalid_master_entity",
+                        f"Master entity '{master}' must be a climate entity",
+                    )
+                    return
+                if master in g.get("members", []):
+                    connection.send_error(
+                        msg["id"],
+                        "master_in_members",
+                        f"Master entity '{master}' cannot also be a group member",
+                    )
+                    return
+                if master in all_members:
+                    connection.send_error(
+                        msg["id"],
+                        "master_is_other_member",
+                        f"Master entity '{master}' is a member of another group",
+                    )
+                    return
+                all_masters.append(master)
+            script = g.get("action_script", "")
+            if script and not script.startswith("script."):
+                connection.send_error(
+                    msg["id"],
+                    "invalid_action_script",
+                    f"Action script '{script}' must be a script entity",
+                )
+                return
+        if len(all_masters) != len(set(all_masters)):
+            connection.send_error(
+                msg["id"],
+                "duplicate_master",
+                "A master entity cannot be assigned to multiple groups",
             )
             return
 

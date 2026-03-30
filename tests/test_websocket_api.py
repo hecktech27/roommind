@@ -1961,6 +1961,218 @@ async def test_save_settings_compressor_groups_invalid_member(ws_hass, store, co
 
 
 # ---------------------------------------------------------------------------
+# Compressor group master device validation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_master_entity_valid(ws_hass, store, connection):
+    """Master entity saves successfully."""
+    await store.async_load()
+
+    msg = {
+        "id": 30,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "Test",
+                "members": ["climate.ac1"],
+                "master_entity": "climate.boiler",
+                "conflict_resolution": "heating_priority",
+                "action_script": "",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_result.assert_called_once()
+    result = connection.send_result.call_args[0][1]
+    saved = result["settings"]["compressor_groups"][0]
+    assert saved["master_entity"] == "climate.boiler"
+    assert saved["conflict_resolution"] == "heating_priority"
+    assert saved["action_script"] == ""
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_master_non_climate(ws_hass, store, connection):
+    """Master entity must be a climate entity."""
+    await store.async_load()
+
+    msg = {
+        "id": 31,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "Test",
+                "members": ["climate.ac1"],
+                "master_entity": "switch.boiler",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args[0][1] == "invalid_master_entity"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_master_in_own_members(ws_hass, store, connection):
+    """Master entity cannot be a member of its own group."""
+    await store.async_load()
+
+    msg = {
+        "id": 32,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "Test",
+                "members": ["climate.boiler"],
+                "master_entity": "climate.boiler",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args[0][1] == "master_in_members"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_master_in_other_members(ws_hass, store, connection):
+    """Master entity cannot be a member of another group."""
+    await store.async_load()
+
+    msg = {
+        "id": 33,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "G1",
+                "members": ["climate.ac1"],
+            },
+            {
+                "id": "g2",
+                "name": "G2",
+                "members": ["climate.ac2"],
+                "master_entity": "climate.ac1",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args[0][1] == "master_is_other_member"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_duplicate_masters(ws_hass, store, connection):
+    """Same master entity cannot be in multiple groups."""
+    await store.async_load()
+
+    msg = {
+        "id": 34,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "G1",
+                "members": ["climate.ac1"],
+                "master_entity": "climate.boiler",
+            },
+            {
+                "id": "g2",
+                "name": "G2",
+                "members": ["climate.ac2"],
+                "master_entity": "climate.boiler",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args[0][1] == "duplicate_master"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_invalid_action_script(ws_hass, store, connection):
+    """Action script must be a script entity."""
+    await store.async_load()
+
+    msg = {
+        "id": 35,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "Test",
+                "members": ["climate.ac1"],
+                "action_script": "automation.foo",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args[0][1] == "invalid_action_script"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_valid_action_script(ws_hass, store, connection):
+    """Valid action script saves successfully."""
+    await store.async_load()
+
+    msg = {
+        "id": 36,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "Test",
+                "members": ["climate.ac1"],
+                "action_script": "script.boiler_control",
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_result.assert_called_once()
+    result = connection.send_result.call_args[0][1]
+    saved = result["settings"]["compressor_groups"][0]
+    assert saved["action_script"] == "script.boiler_control"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_compressor_backward_compat(ws_hass, store, connection):
+    """Groups without new fields save successfully (no validation errors)."""
+    await store.async_load()
+
+    msg = {
+        "id": 37,
+        "type": "roommind/settings/save",
+        "compressor_groups": [
+            {
+                "id": "g1",
+                "name": "Test",
+                "members": ["climate.ac1"],
+            },
+        ],
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    # No error — old-format groups pass validation
+    connection.send_result.assert_called_once()
+    result = connection.send_result.call_args[0][1]
+    saved = result["settings"]["compressor_groups"][0]
+    assert saved["id"] == "g1"
+    # New fields not present (schema defaults only applied via decorator)
+    assert "master_entity" not in saved or saved["master_entity"] == ""
+
+
+# ---------------------------------------------------------------------------
 # V11: Legacy-only save syncs devices
 # ---------------------------------------------------------------------------
 
