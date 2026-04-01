@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from custom_components.roommind.const import MODE_IDLE
+
 from .conftest import (
     SAMPLE_ROOM,
     _create_coordinator,
@@ -833,3 +835,251 @@ class TestMasterDeviceControl:
             c for c in hass.services.async_call.call_args_list if len(c.args) >= 3 and c.args[0] == "script"
         ]
         assert len(script_calls_2) == 0
+
+
+class TestEnforceUniformMode:
+    """Tests for enforce_uniform_mode on compressor groups."""
+
+    @pytest.mark.asyncio
+    async def test_enforce_forces_conflicting_room_idle(self, hass, mock_config_entry):
+        """Room with conflicting mode is forced to idle on second cycle."""
+        room_a = _room_with_device("room_a", "climate.trv_a")
+        room_b = {
+            **_room_with_device("room_b", "climate.ac_b"),
+            "thermostats": [],
+            "acs": ["climate.ac_b"],
+            "devices": [
+                {
+                    "entity_id": "climate.ac_b",
+                    "type": "ac",
+                    "role": "auto",
+                    "heating_system_type": "",
+                }
+            ],
+            "climate_mode": "cool_only",
+            "temperature_sensor": "sensor.room_b_temp",
+            "humidity_sensor": "sensor.room_b_humidity",
+            "schedules": [{"entity_id": "schedule.room_b_heating"}],
+        }
+        store = _make_store_mock({"room_a": room_a, "room_b": room_b})
+        store.get_settings.return_value = {
+            "climate_control_active": True,
+            "compressor_groups": [
+                {
+                    "id": "g1",
+                    "name": "G1",
+                    "members": ["climate.trv_a", "climate.ac_b"],
+                    "enforce_uniform_mode": True,
+                    # no master_entity — enforce-only mode
+                }
+            ],
+        }
+
+        # room_a: temp=18 (below 21 comfort) -> heating
+        # room_b: temp=28 (above 24 comfort_cool for cool_only) -> cooling
+        base_get = make_mock_states_get(temp="18.0")
+
+        ac_b_state = MagicMock()
+        ac_b_state.state = "off"
+        ac_b_state.attributes = {
+            "hvac_modes": ["cool", "off"],
+            "min_temp": 16,
+            "max_temp": 30,
+        }
+
+        room_b_temp = MagicMock()
+        room_b_temp.state = "28.0"
+        room_b_temp.attributes = {}
+
+        room_b_humidity = MagicMock()
+        room_b_humidity.state = "55.0"
+        room_b_humidity.attributes = {}
+
+        room_b_schedule = MagicMock()
+        room_b_schedule.state = "on"
+        room_b_schedule.attributes = {}
+
+        def states_get(eid):
+            if eid == "climate.ac_b":
+                return ac_b_state
+            if eid == "sensor.room_b_temp":
+                return room_b_temp
+            if eid == "sensor.room_b_humidity":
+                return room_b_humidity
+            if eid == "schedule.room_b_heating":
+                return room_b_schedule
+            return base_get(eid)
+
+        hass.states.get = MagicMock(side_effect=states_get)
+        hass.services.async_call = AsyncMock()
+        hass.data = {"roommind": {"store": store}}
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        # Cycle 1: conflict resolution runs, stores "heat" (heating_priority default)
+        await coordinator._async_update_data()
+        state = coordinator._compressor_manager.get_state("g1")
+        assert state.master_action == "heat"
+
+        # Cycle 2: room_b (cooling) should be forced idle by enforcement
+        hass.services.async_call.reset_mock()
+        result = await coordinator._async_update_data()
+
+        # room_b should now be idle due to enforcement
+        room_b_mode = result["rooms"].get("room_b", {}).get("mode")
+        assert room_b_mode == MODE_IDLE
+
+        # No master climate commands should be sent (no master_entity)
+        master_calls = [
+            c
+            for c in hass.services.async_call.call_args_list
+            if len(c.args) >= 3
+            and c.args[0] == "climate"
+            and c.args[1] == "set_hvac_mode"
+            and c.args[2].get("entity_id") not in ("climate.trv_a", "climate.ac_b")
+        ]
+        assert len(master_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_enforce_no_override_when_rooms_agree(self, hass, mock_config_entry):
+        """All rooms heating -> no enforcement override."""
+        room_a = _room_with_device("room_a", "climate.trv_a")
+        room_b = _room_with_device(
+            "room_b",
+            "climate.trv_b",
+            temperature_sensor="sensor.room_b_temp",
+            humidity_sensor="sensor.room_b_humidity",
+            schedules=[{"entity_id": "schedule.room_b_heating"}],
+        )
+        store = _make_store_mock({"room_a": room_a, "room_b": room_b})
+        store.get_settings.return_value = {
+            "climate_control_active": True,
+            "compressor_groups": [
+                {
+                    "id": "g1",
+                    "name": "G1",
+                    "members": ["climate.trv_a", "climate.trv_b"],
+                    "enforce_uniform_mode": True,
+                }
+            ],
+        }
+
+        # Both rooms cold -> both heating
+        base_get = make_mock_states_get(temp="18.0")
+
+        room_b_temp = MagicMock()
+        room_b_temp.state = "18.0"
+        room_b_temp.attributes = {}
+
+        room_b_humidity = MagicMock()
+        room_b_humidity.state = "50.0"
+        room_b_humidity.attributes = {}
+
+        room_b_schedule = MagicMock()
+        room_b_schedule.state = "on"
+        room_b_schedule.attributes = {}
+
+        trv_b_state = MagicMock()
+        trv_b_state.state = "heat"
+        trv_b_state.attributes = {
+            "hvac_modes": ["heat", "off"],
+            "min_temp": 5,
+            "max_temp": 30,
+        }
+
+        def states_get(eid):
+            if eid == "climate.trv_b":
+                return trv_b_state
+            if eid == "sensor.room_b_temp":
+                return room_b_temp
+            if eid == "sensor.room_b_humidity":
+                return room_b_humidity
+            if eid == "schedule.room_b_heating":
+                return room_b_schedule
+            return base_get(eid)
+
+        hass.states.get = MagicMock(side_effect=states_get)
+        hass.services.async_call = AsyncMock()
+        hass.data = {"roommind": {"store": store}}
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+
+        # Cycle 1: both heating, no conflict
+        await coordinator._async_update_data()
+        state = coordinator._compressor_manager.get_state("g1")
+        assert state.master_action == "heat"
+
+        # Cycle 2: both still heating, no override
+        result = await coordinator._async_update_data()
+        room_a_mode = result["rooms"].get("room_a", {}).get("mode")
+        room_b_mode = result["rooms"].get("room_b", {}).get("mode")
+        assert room_a_mode == "heating"
+        assert room_b_mode == "heating"
+
+    @pytest.mark.asyncio
+    async def test_no_enforce_backwards_compat(self, hass, mock_config_entry):
+        """Group without enforce_uniform_mode does NOT run conflict resolution."""
+        room = _room_with_device("living_room_abc12345", "climate.living_trv")
+        store = _make_store_mock({"living_room_abc12345": room})
+        store.get_settings.return_value = {
+            "climate_control_active": True,
+            "compressor_groups": [
+                {
+                    "id": "g1",
+                    "name": "G1",
+                    "members": ["climate.living_trv"],
+                    # no master_entity, no action_script, no enforce_uniform_mode
+                }
+            ],
+        }
+
+        hass.states.get = MagicMock(side_effect=make_mock_states_get(temp="18.0"))
+        hass.services.async_call = AsyncMock()
+        hass.data = {"roommind": {"store": store}}
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+
+        # master_action should NOT be set (group skipped in _async_control_master_devices)
+        state = coordinator._compressor_manager.get_state("g1")
+        assert state.master_action is None
+
+    @pytest.mark.asyncio
+    async def test_enforce_conflict_resolution_runs_without_master(self, hass, mock_config_entry):
+        """enforce_uniform_mode group without master_entity still resolves and stores action."""
+        room = _room_with_device("living_room_abc12345", "climate.living_trv")
+        store = _make_store_mock({"living_room_abc12345": room})
+        store.get_settings.return_value = {
+            "climate_control_active": True,
+            "compressor_groups": [
+                {
+                    "id": "g1",
+                    "name": "G1",
+                    "members": ["climate.living_trv"],
+                    "enforce_uniform_mode": True,
+                    # no master_entity
+                }
+            ],
+        }
+
+        hass.states.get = MagicMock(side_effect=make_mock_states_get(temp="18.0"))
+        hass.services.async_call = AsyncMock()
+        hass.data = {"roommind": {"store": store}}
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        await coordinator._async_update_data()
+
+        # Conflict resolution should have run and stored action
+        state = coordinator._compressor_manager.get_state("g1")
+        assert state.master_action == "heat"
+
+        # No master climate commands
+        master_calls = [
+            c
+            for c in hass.services.async_call.call_args_list
+            if len(c.args) >= 3
+            and c.args[0] == "climate"
+            and c.args[1] == "set_hvac_mode"
+            and c.args[2].get("entity_id") not in ("climate.living_trv",)
+        ]
+        assert len(master_calls) == 0

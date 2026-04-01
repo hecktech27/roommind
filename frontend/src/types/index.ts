@@ -79,6 +79,7 @@ export interface CompressorGroup {
   master_entity: string;
   conflict_resolution: ConflictResolution;
   action_script: string;
+  enforce_uniform_mode: boolean;
 }
 
 export interface RoomConfig {

@@ -31,6 +31,7 @@ class CompressorGroupConfig:
     master_entity: str = ""
     conflict_resolution: str = "heating_priority"
     action_script: str = ""
+    enforce_uniform_mode: bool = False
 
 
 @dataclass
@@ -68,6 +69,7 @@ class CompressorGroupManager:
                 master_entity=g.get("master_entity", ""),
                 conflict_resolution=g.get("conflict_resolution", DEFAULT_CONFLICT_RESOLUTION),
                 action_script=g.get("action_script", ""),
+                enforce_uniform_mode=g.get("enforce_uniform_mode", False),
             )
             for eid in g.get("members", []):
                 new_entity_map[eid] = gid
@@ -156,6 +158,17 @@ class CompressorGroupManager:
     def get_state(self, group_id: str) -> CompressorGroupState | None:
         """Return runtime state for a group."""
         return self._states.get(group_id)
+
+    def get_enforced_action(self, entity_id: str) -> str | None:
+        """Return the group's resolved action if uniform mode is enforced, else None."""
+        gid = self._entity_to_group.get(entity_id)
+        if gid is None:
+            return None
+        group = self._groups.get(gid)
+        if group is None or not group.enforce_uniform_mode:
+            return None
+        state = self._states.get(gid)
+        return state.master_action if state else None
 
     def check_master_can_switch(self, group_id: str, new_action: str) -> bool:
         """Check if the master device is allowed to switch to *new_action*.

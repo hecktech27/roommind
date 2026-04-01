@@ -413,6 +413,8 @@
   "compressor.conflict_outdoor_temp": "Based on outdoor temperature",
   "compressor.action_script": "Action script",
   "compressor.action_script_hint": "A Home Assistant script that runs whenever the heating/cooling demand changes. Useful for systems that need special commands, e.g. cancelling a Vaillant Quick Veto or toggling a relay. Works with or without a master device. Without a master device, only the script is triggered. Receives variables: action (heat/cool/idle), master_entity, members, active_members.",
+  "compressor.enforce_uniform_mode": "Enforce uniform mode",
+  "compressor.enforce_uniform_mode_hint": "All thermostats in this group must operate in the same HVAC mode (all heating or all cooling). Rooms that disagree with the resolved group mode will be set to idle. Use this for heat pumps that start automatically but require all connected units to run the same mode.",
 
   "mold.title": "Mold Risk Protection",
   "mold.detection": "Mold Detection",

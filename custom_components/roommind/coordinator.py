@@ -603,6 +603,13 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 if mode != MODE_IDLE:
                     if not self._compressor_manager.check_can_activate(eid):
                         compressor_forced_off.add(eid)
+                    else:
+                        enforced = self._compressor_manager.get_enforced_action(eid)
+                        if enforced is not None and enforced != "idle":
+                            if (mode == MODE_HEATING and enforced == "cool") or (
+                                mode == MODE_COOLING and enforced == "heat"
+                            ):
+                                compressor_forced_off.add(eid)
                 else:
                     if self._compressor_manager.check_must_stay_active(eid):
                         compressor_forced_on.add(eid)
@@ -1374,7 +1381,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         Groups with only action_script (no master_entity) get script-only mode.
         """
         for gid, group in self._compressor_manager.get_groups().items():
-            if not group.master_entity and not group.action_script:
+            if not group.master_entity and not group.action_script and not group.enforce_uniform_mode:
                 continue
             try:
                 has_master = bool(group.master_entity)
@@ -1469,7 +1476,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
                 # 7. Update state + log transition
                 if new_action != prev_action:
-                    label = group.master_entity or group.action_script
+                    label = group.master_entity or group.action_script or f"group:{group.id}"
                     _LOGGER.info(
                         "Master '%s' (group '%s'): %s -> %s",
                         label,

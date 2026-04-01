@@ -589,6 +589,7 @@ async def websocket_get_settings(
                 vol.Optional("master_entity", default=""): str,
                 vol.Optional("conflict_resolution", default=DEFAULT_CONFLICT_RESOLUTION): vol.In(CONFLICT_RESOLUTIONS),
                 vol.Optional("action_script", default=""): str,
+                vol.Optional("enforce_uniform_mode", default=False): bool,
             }
         ],
     }

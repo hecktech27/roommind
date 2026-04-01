@@ -192,7 +192,23 @@ export class RsSettingsCompressor extends LitElement {
         ></ha-entity-picker>
         <div class="field-hint">${localize("compressor.master_entity_hint", l)}</div>
 
-        ${group.master_entity
+        <div class="field-row">
+          <ha-formfield .label=${localize("compressor.enforce_uniform_mode", l)}>
+            <ha-switch
+              .checked=${group.enforce_uniform_mode || false}
+              @change=${(e: Event) => {
+                this._updateGroup(
+                  idx,
+                  "enforce_uniform_mode",
+                  (e.target as HTMLInputElement).checked,
+                );
+              }}
+            ></ha-switch>
+          </ha-formfield>
+          <div class="field-hint">${localize("compressor.enforce_uniform_mode_hint", l)}</div>
+        </div>
+
+        ${group.master_entity || group.enforce_uniform_mode
           ? html`
               <div class="field-row">
                 <ha-select
@@ -328,6 +344,7 @@ export class RsSettingsCompressor extends LitElement {
         master_entity: "",
         conflict_resolution: "heating_priority" as ConflictResolution,
         action_script: "",
+        enforce_uniform_mode: false,
       },
     ]);
   }

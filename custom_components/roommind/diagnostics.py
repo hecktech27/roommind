@@ -116,10 +116,11 @@ def _build_compressor_state(coordinator: Any) -> dict[str, Any]:
             entry["on_for_s"] = round(now - state.compressor_on_since)
         if state.compressor_off_since:
             entry["off_for_s"] = round(now - state.compressor_off_since)
-        if group_cfg and group_cfg.master_entity:
+        if group_cfg and (group_cfg.master_entity or group_cfg.enforce_uniform_mode):
             entry["master_entity"] = group_cfg.master_entity
             entry["master_action"] = state.master_action
             entry["conflict_resolution"] = group_cfg.conflict_resolution
+            entry["enforce_uniform_mode"] = group_cfg.enforce_uniform_mode
             if group_cfg.action_script:
                 entry["action_script"] = group_cfg.action_script
             if state.master_on_since:

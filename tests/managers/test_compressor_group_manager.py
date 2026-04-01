@@ -8,14 +8,17 @@ from custom_components.roommind.managers.compressor_group_manager import (
 )
 
 
-def _make_group(gid="g1", members=None, min_run=15, min_off=5):
-    return {
+def _make_group(gid="g1", members=None, min_run=15, min_off=5, enforce_uniform_mode=False):
+    g = {
         "id": gid,
         "name": f"Group {gid}",
         "members": members or ["climate.ac1"],
         "min_run_minutes": min_run,
         "min_off_minutes": min_off,
     }
+    if enforce_uniform_mode:
+        g["enforce_uniform_mode"] = True
+    return g
 
 
 class TestCompressorGroupManager:
@@ -344,3 +347,53 @@ class TestMasterDeviceState:
         mgr.set_master_action("g1", "idle")
         assert mgr.get_state("g1").master_off_since is not None
         assert mgr.get_state("g1").master_on_since is None
+
+
+class TestEnforceUniformMode:
+    def test_load_groups_reads_enforce_uniform_mode(self):
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group(enforce_uniform_mode=True)])
+        cfg = mgr.get_groups()["g1"]
+        assert cfg.enforce_uniform_mode is True
+
+    def test_load_groups_default_enforce_false(self):
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group()])
+        cfg = mgr.get_groups()["g1"]
+        assert cfg.enforce_uniform_mode is False
+
+    def test_get_enforced_action_disabled(self):
+        """enforce_uniform_mode=False → returns None."""
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group()])
+        mgr.set_master_action("g1", "heat")
+        assert mgr.get_enforced_action("climate.ac1") is None
+
+    def test_get_enforced_action_enabled(self):
+        """enforce_uniform_mode=True → returns stored action."""
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group(enforce_uniform_mode=True)])
+        mgr.set_master_action("g1", "heat")
+        assert mgr.get_enforced_action("climate.ac1") == "heat"
+
+    def test_get_enforced_action_first_cycle(self):
+        """enforce_uniform_mode=True, no action set yet → returns None."""
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group(enforce_uniform_mode=True)])
+        assert mgr.get_enforced_action("climate.ac1") is None
+
+    def test_get_enforced_action_entity_not_in_group(self):
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group(enforce_uniform_mode=True)])
+        assert mgr.get_enforced_action("climate.unknown") is None
+
+    def test_get_enforced_action_updates_with_master_action(self):
+        """Action follows set_master_action transitions."""
+        mgr = CompressorGroupManager()
+        mgr.load_groups([_make_group(enforce_uniform_mode=True)])
+        mgr.set_master_action("g1", "heat")
+        assert mgr.get_enforced_action("climate.ac1") == "heat"
+        mgr.set_master_action("g1", "cool")
+        assert mgr.get_enforced_action("climate.ac1") == "cool"
+        mgr.set_master_action("g1", "idle")
+        assert mgr.get_enforced_action("climate.ac1") == "idle"
