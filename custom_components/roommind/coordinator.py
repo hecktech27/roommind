@@ -365,6 +365,29 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         return current_temp, current_temp_raw, current_humidity, has_external_sensor
 
+    async def _evaluate_mold_risk(
+        self,
+        area_id: str,
+        current_temp: float | None,
+        current_humidity: float | None,
+        settings: dict,
+    ) -> tuple[str, float | None, bool, float]:
+        """Evaluate mold risk for a room.
+
+        Returns (mold_risk_level, mold_surface_rh, mold_prevention_active, mold_prevention_delta).
+        """
+        mold = await self._mold_manager.evaluate(
+            area_id,
+            _get_area_name(self.hass, area_id),
+            current_temp,
+            current_humidity,
+            self.outdoor_temp,
+            settings,
+            celsius_delta_to_ha_fn=lambda d: celsius_delta_to_ha(self.hass, d),  # type: ignore[misc]
+            ha_temp_unit_str_fn=lambda: ha_temp_unit_str(self.hass),  # type: ignore[misc]
+        )
+        return mold.risk_level, mold.surface_rh, mold.prevention_active, mold.prevention_delta
+
     async def _async_process_room(self, room: dict, settings: dict, outdoor_forecast: list[dict]) -> dict:
         """Process a single room: read sensor, evaluate schedule, apply control."""
         area_id = room.get("area_id", "unknown")
@@ -407,20 +430,12 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             }
 
         # --- Mold risk calculation ---
-        mold = await self._mold_manager.evaluate(
-            area_id,
-            _get_area_name(self.hass, area_id),
-            current_temp,
-            current_humidity,
-            self.outdoor_temp,
-            settings,
-            celsius_delta_to_ha_fn=lambda d: celsius_delta_to_ha(self.hass, d),  # type: ignore[misc]
-            ha_temp_unit_str_fn=lambda: ha_temp_unit_str(self.hass),  # type: ignore[misc]
-        )
-        mold_risk_level = mold.risk_level
-        mold_surface_rh = mold.surface_rh
-        mold_prevention_active_room = mold.prevention_active
-        mold_prevention_temp_delta = mold.prevention_delta
+        (
+            mold_risk_level,
+            mold_surface_rh,
+            mold_prevention_active_room,
+            mold_prevention_temp_delta,
+        ) = await self._evaluate_mold_risk(area_id, current_temp, current_humidity, settings)
 
         # Determine dual heat/cool target temperatures
         # Returns TargetTemps(heat, cool). None values mean "force off".
