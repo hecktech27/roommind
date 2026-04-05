@@ -427,6 +427,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 "cover_auto_paused": False,
                 "cover_forced_reason": "",
                 "active_cover_schedule_index": -1,
+                "q_occupancy": 0.0,
+                "active_heat_sources": None,
             }
 
         # --- Mold risk calculation ---

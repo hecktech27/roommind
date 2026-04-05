@@ -97,6 +97,8 @@ OUTDOOR_ROOM_KEYS = {
     "cover_auto_paused",
     "cover_forced_reason",
     "active_cover_schedule_index",
+    "q_occupancy",
+    "active_heat_sources",
 }
 
 
@@ -210,9 +212,9 @@ class TestProcessRoomSnapshot:
         assert result["force_off"] is False  # NOT True!
         assert result["target_temp"] is None
         assert result["override_active"] is False
-        # Outdoor rooms do NOT have q_occupancy or active_heat_sources
-        assert "q_occupancy" not in result
-        assert "active_heat_sources" not in result
+        # Outdoor rooms now include q_occupancy and active_heat_sources for consistency
+        assert result["q_occupancy"] == 0.0
+        assert result["active_heat_sources"] is None
 
     @pytest.mark.asyncio
     async def test_climate_control_disabled(self, hass, mock_config_entry):
