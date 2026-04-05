@@ -364,8 +364,12 @@ class TestMasterDeviceControl:
         assert call_data["variables"]["members"] == ["climate.living_trv"]
 
     @pytest.mark.asyncio
-    async def test_master_idle_when_climate_globally_disabled(self, hass, mock_config_entry):
-        """Master should go idle when climate_control_active is False."""
+    async def test_master_not_controlled_when_climate_globally_disabled(self, hass, mock_config_entry):
+        """Master entity must not be touched when climate_control_active is False.
+
+        The user may manually operate the master device. RoomMind must not
+        override that by forcing it off every 30 seconds.
+        """
         room = _room_with_device("living_room_abc12345", "climate.living_trv")
         store = _make_store_mock({"living_room_abc12345": room})
         store.get_settings.return_value = {
@@ -380,7 +384,7 @@ class TestMasterDeviceControl:
             ],
         }
 
-        # Master currently heating
+        # Master currently heating - user turned it on manually
         master_state = _make_master_state("heat")
         base_get = make_mock_states_get(temp="18.0")
 
@@ -396,6 +400,7 @@ class TestMasterDeviceControl:
         coordinator = _create_coordinator(hass, mock_config_entry)
         await coordinator._async_update_data()
 
+        # RoomMind must not send any command to the master entity
         boiler_calls = [
             c
             for c in hass.services.async_call.call_args_list
@@ -404,8 +409,7 @@ class TestMasterDeviceControl:
             and c.args[1] == "set_hvac_mode"
             and c.args[2].get("entity_id") == "climate.boiler"
         ]
-        assert len(boiler_calls) >= 1
-        assert boiler_calls[-1].args[2]["hvac_mode"] == "off"
+        assert len(boiler_calls) == 0
 
     @pytest.mark.asyncio
     async def test_master_missing_entity_returns_none(self, hass, mock_config_entry):

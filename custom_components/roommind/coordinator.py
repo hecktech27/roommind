@@ -1543,6 +1543,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         Groups with master_entity get climate commands + optional script.
         Groups with only action_script (no master_entity) get script-only mode.
         """
+        if not settings.get("climate_control_active", True):
+            return
         for gid, group in self._compressor_manager.get_groups().items():
             if not group.master_entity and not group.action_script and not group.enforce_uniform_mode:
                 continue
