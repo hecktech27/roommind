@@ -210,7 +210,8 @@ class TestCoverageGaps:
 
         assert result == pytest.approx(24.0)
 
-    def test_estimate_solar_peak_temp_not_enough_idle(self, hass, mock_config_entry):
+    @patch("custom_components.roommind.managers.cover_orchestrator.build_solar_series", return_value=[0.5])
+    def test_estimate_solar_peak_temp_not_enough_idle(self, _mock_solar, hass, mock_config_entry):
         """Falls back to linear when not enough idle observations (Tier 2)."""
         from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_LINEAR_LOOKAHEAD_H
 
@@ -224,7 +225,8 @@ class TestCoverageGaps:
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
-    def test_estimate_solar_peak_temp_exception_fallback(self, hass, mock_config_entry):
+    @patch("custom_components.roommind.managers.cover_orchestrator.build_solar_series", return_value=[0.5])
+    def test_estimate_solar_peak_temp_exception_fallback(self, _mock_solar, hass, mock_config_entry):
         """Falls back to linear when model manager raises."""
         from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_LINEAR_LOOKAHEAD_H
 
@@ -236,7 +238,8 @@ class TestCoverageGaps:
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
-    def test_estimate_solar_peak_temp_no_current_temp(self, hass, mock_config_entry):
+    @patch("custom_components.roommind.managers.cover_orchestrator.build_solar_series", return_value=[0.5])
+    def test_estimate_solar_peak_temp_no_current_temp(self, _mock_solar, hass, mock_config_entry):
         """Uses target_temp as base when current_temp is None."""
         from custom_components.roommind.const import COVER_DEFAULT_BETA_S, COVER_LINEAR_LOOKAHEAD_H
 
@@ -261,7 +264,13 @@ class TestCoverageGaps:
         # Enough idle data, but model not confident
         coordinator._model_manager.get_mode_counts = MagicMock(return_value=(COVER_MIN_IDLE_FOR_LEARNED, 10, 5))
 
-        with patch.object(coordinator._cover_orchestrator, "_idle_solar_model_confident", return_value=False):
+        with (
+            patch.object(coordinator._cover_orchestrator, "_idle_solar_model_confident", return_value=False),
+            patch(
+                "custom_components.roommind.managers.cover_orchestrator.build_solar_series",
+                return_value=[0.5],
+            ),
+        ):
             result = coordinator._cover_orchestrator._estimate_solar_peak_temp(
                 "room1", 20.0, 22.0, 0.5, outdoor_temp=15.0
             )
@@ -281,7 +290,13 @@ class TestCoverageGaps:
 
         coordinator._model_manager.get_mode_counts = MagicMock(return_value=(COVER_MIN_IDLE_FOR_LEARNED, 10, 5))
 
-        result = coordinator._cover_orchestrator._estimate_solar_peak_temp("room1", 20.0, 22.0, 0.5, outdoor_temp=None)
+        with patch(
+            "custom_components.roommind.managers.cover_orchestrator.build_solar_series",
+            return_value=[0.5],
+        ):
+            result = coordinator._cover_orchestrator._estimate_solar_peak_temp(
+                "room1", 20.0, 22.0, 0.5, outdoor_temp=None
+            )
 
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..const import (
     COVER_CONFIDENCE_REFERENCE_SOLAR,
+    COVER_DAILY_LOOKAHEAD_H,
     COVER_DEFAULT_BETA_S,
     COVER_LINEAR_LOOKAHEAD_H,
     COVER_MAX_PREDICTION_STD,
@@ -280,8 +281,19 @@ class CoverOrchestrator:
         except Exception:  # noqa: BLE001
             pass
 
-        # Tier 2: Conservative linear fallback with default beta_s
-        return base_temp + COVER_DEFAULT_BETA_S * q_solar * COVER_LINEAR_LOOKAHEAD_H
+        # Tier 2: Linear fallback using daily solar peak + cloud forecast.
+        # Using the daily peak (instead of current q_solar) means the initial position is computed
+        # from the afternoon maximum — one decisive deployment rather than incremental steps as q_solar rises.
+        n_daily = int(COVER_DAILY_LOOKAHEAD_H * 60 / COVER_PREDICTION_DT_MINUTES)
+        daily_series = build_solar_series(
+            self.hass.config.latitude,
+            self.hass.config.longitude,
+            n_daily,
+            dt_minutes=COVER_PREDICTION_DT_MINUTES,
+            cloud_series=self._cloud_series,
+        )
+        q_solar_peak = max(daily_series) if daily_series else q_solar
+        return base_temp + COVER_DEFAULT_BETA_S * q_solar_peak * COVER_LINEAR_LOOKAHEAD_H
 
     def _idle_solar_model_confident(self, area_id: str, T_room: float, T_outdoor: float) -> bool:
         """Check if idle model with solar is confident enough for trajectory prediction.

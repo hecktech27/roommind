@@ -19,6 +19,8 @@ from custom_components.roommind.managers.cover_orchestrator import (
     CoverResult,
 )
 
+_BUILD_SOLAR_SERIES = "custom_components.roommind.managers.cover_orchestrator.build_solar_series"
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 
@@ -717,8 +719,9 @@ class TestAsyncProcess:
 
 
 class TestEstimateSolarPeakTemp:
-    def test_tier2_linear_fallback(self):
-        """With no idle samples, falls back to linear: base + beta_s * q_solar * lookahead."""
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.5])
+    def test_tier2_linear_fallback(self, _mock_solar):
+        """With no idle samples, falls back to linear: base + beta_s * daily_peak * lookahead."""
         mm = _make_model_manager()
         mm.get_mode_counts.return_value = (0, 0, 0)  # No idle samples
         orch = CoverOrchestrator(_make_hass(), _make_cover_manager(), mm)
@@ -728,7 +731,8 @@ class TestEstimateSolarPeakTemp:
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
-    def test_tier2_with_none_current_temp(self):
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.5])
+    def test_tier2_with_none_current_temp(self, _mock_solar):
         """When current_temp is None, base_temp falls back to target_temp."""
         mm = _make_model_manager()
         mm.get_mode_counts.return_value = (0, 0, 0)
@@ -739,8 +743,9 @@ class TestEstimateSolarPeakTemp:
         expected = 22.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)
 
-    def test_tier2_with_zero_solar(self):
-        """With zero solar, peak equals base temp."""
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.0])
+    def test_tier2_with_zero_solar(self, _mock_solar):
+        """When daily solar peak is zero, peak equals base temp."""
         mm = _make_model_manager()
         mm.get_mode_counts.return_value = (0, 0, 0)
         orch = CoverOrchestrator(_make_hass(), _make_cover_manager(), mm)
@@ -749,8 +754,9 @@ class TestEstimateSolarPeakTemp:
 
         assert result == pytest.approx(20.0)
 
-    def test_model_exception_falls_back_to_linear(self):
-        """If model_manager raises, falls back to linear."""
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.5])
+    def test_model_exception_falls_back_to_linear(self, _mock_solar):
+        """If model_manager raises, falls back to linear using daily peak."""
         mm = _make_model_manager()
         mm.get_mode_counts.side_effect = Exception("no model")
         orch = CoverOrchestrator(_make_hass(), _make_cover_manager(), mm)
@@ -758,4 +764,41 @@ class TestEstimateSolarPeakTemp:
         result = orch._estimate_solar_peak_temp("living_room", 20.0, 21.0, 0.5, 15.0)
 
         expected = 20.0 + COVER_DEFAULT_BETA_S * 0.5 * COVER_LINEAR_LOOKAHEAD_H
+        assert result == pytest.approx(expected)
+
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.2, 0.5, 0.9, 0.8, 0.6])
+    def test_tier2_uses_daily_peak_not_current_q_solar(self, _mock_solar):
+        """Tier 2 uses max of daily solar series (0.9), not the current q_solar argument (0.2)."""
+        mm = _make_model_manager()
+        mm.get_mode_counts.return_value = (0, 0, 0)
+        orch = CoverOrchestrator(_make_hass(), _make_cover_manager(), mm)
+
+        result = orch._estimate_solar_peak_temp("living_room", 20.0, 21.0, 0.2, 15.0)
+
+        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.9 * COVER_LINEAR_LOOKAHEAD_H
+        assert result == pytest.approx(expected)
+
+    def test_tier2_cloud_series_passed_to_build_solar_series(self):
+        """Tier 2 passes the orchestrator's cloud_series to build_solar_series."""
+        mm = _make_model_manager()
+        mm.get_mode_counts.return_value = (0, 0, 0)
+        orch = CoverOrchestrator(_make_hass(), _make_cover_manager(), mm)
+        orch.set_cloud_series([50.0, 60.0])
+
+        with patch(_BUILD_SOLAR_SERIES, return_value=[0.4]) as mock_bs:
+            orch._estimate_solar_peak_temp("living_room", 20.0, 21.0, 0.5, 15.0)
+
+        _call_kwargs = mock_bs.call_args
+        assert _call_kwargs.kwargs.get("cloud_series") == [50.0, 60.0]
+
+    @patch(_BUILD_SOLAR_SERIES, return_value=[])
+    def test_tier2_fallback_when_daily_series_empty(self, _mock_solar):
+        """When build_solar_series returns empty list, falls back to current q_solar argument."""
+        mm = _make_model_manager()
+        mm.get_mode_counts.return_value = (0, 0, 0)
+        orch = CoverOrchestrator(_make_hass(), _make_cover_manager(), mm)
+
+        result = orch._estimate_solar_peak_temp("living_room", 20.0, 21.0, 0.7, 15.0)
+
+        expected = 20.0 + COVER_DEFAULT_BETA_S * 0.7 * COVER_LINEAR_LOOKAHEAD_H
         assert result == pytest.approx(expected)

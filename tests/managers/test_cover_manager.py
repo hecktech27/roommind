@@ -36,7 +36,7 @@ def test_cover_constants_exist():
     assert COVER_MAX_EFFECTIVENESS == 0.85
     assert COVER_USER_CONFLICT_THRESHOLD == 15
     assert COVER_USER_OVERRIDE_MINUTES == 60
-    assert COVER_POS_DEADBAND == 10
+    assert COVER_POS_DEADBAND == 20
     assert COVER_PREDICTION_DT_MINUTES == 5.0
     assert COVER_RC_LOOKAHEAD_H == 2.0
     assert COVER_LINEAR_LOOKAHEAD_H == 1.0
@@ -869,10 +869,10 @@ def test_min_position_100_prevents_closing():
 
 
 def test_deadband_prevents_small_changes():
-    """Cover at 25%, desired would be 20% → no change (within 10% deadband)."""
+    """Cover at 25%, desired would be 20% → no change (5% diff < 20% deadband)."""
     mgr = CoverManager()
     mgr.update_position("r", 25)
-    # excess = 25.1 - 22 = 3.1, raw_close = int((3.1-1.5)*50) = 80, desired = max(0, 100-80) = 20
+    # excess = 25.1 - 22 = 3.1, raw_close = int((3.1-1.5)*50) = 80, desired = max(0, 100-80) = 20, diff=5
     d = mgr.evaluate("r", **{**_BASE_KWARGS, "predicted_peak_temp": 25.1, "target_temp": 22.0})
     assert not d.changed
     assert d.reason == "deadband"
@@ -880,31 +880,31 @@ def test_deadband_prevents_small_changes():
 
 
 def test_deadband_allows_large_changes():
-    """Cover at 25%, desired would be 0% → change (>10% deadband)."""
+    """Cover at 25%, desired would be 0% → change (25% diff > 20% deadband)."""
     mgr = CoverManager()
     mgr.update_position("r", 25)
-    # excess = 26.0 - 22 = 4.0, raw_close = int((4.0-1.5)*50) = 125 → 100, desired = 0
+    # excess = 26.0 - 22 = 4.0, raw_close = int((4.0-1.5)*50) = 125 → 100, desired = 0, diff=25
     d = mgr.evaluate("r", **{**_BASE_KWARGS, "predicted_peak_temp": 26.0, "target_temp": 22.0})
     assert d.changed
     assert d.target_position == 0
 
 
 def test_deadband_boundary_exact_threshold():
-    """At exactly 10% difference → no change; at 11% → change."""
+    """At exactly 20% difference → no change; at 21% → change."""
     mgr = CoverManager()
     mgr.update_position("r", 40)
-    # excess = 24.9 - 22 = 2.9, raw_close = int((2.9-1.5)*50) = 70, desired = 30 → diff=10 → deadband
+    # excess = 25.1 - 22 = 3.1, raw_close = int((3.1-1.5)*50) = 80, desired = 20 → diff=20 → deadband
     d = mgr.evaluate(
-        "r", **{**_BASE_KWARGS, "predicted_peak_temp": 24.9, "target_temp": 22.0, "covers_deploy_threshold": 1.5}
+        "r", **{**_BASE_KWARGS, "predicted_peak_temp": 25.1, "target_temp": 22.0, "covers_deploy_threshold": 1.5}
     )
     assert not d.changed
     assert d.reason == "deadband"
-    # excess = 24.92 - 22 = 2.92, raw_close = int((2.92-1.5)*50) = 71, desired = 29 → diff=11 → change
+    # excess = 25.12 - 22 = 3.12, raw_close = int((3.12-1.5)*50) = 81, desired = 19 → diff=21 → change
     d2 = mgr.evaluate(
-        "r", **{**_BASE_KWARGS, "predicted_peak_temp": 24.92, "target_temp": 22.0, "covers_deploy_threshold": 1.5}
+        "r", **{**_BASE_KWARGS, "predicted_peak_temp": 25.12, "target_temp": 22.0, "covers_deploy_threshold": 1.5}
     )
     assert d2.changed
-    assert d2.target_position == 29
+    assert d2.target_position == 19
 
 
 @patch("custom_components.roommind.managers.cover_manager.time")
