@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { HomeAssistant, HassArea, CoverScheduleEntry } from "../types";
-import { localize } from "../utils/localize";
+import { localize, type TranslationKey } from "../utils/localize";
 import { getEntitiesForArea } from "../utils/room-state";
 import "./shared/rs-toggle-row";
 import "./shared/rs-threshold-field";
@@ -24,6 +24,7 @@ export class RsCoverSection extends LitElement {
   @property({ type: Boolean }) public nightClose = false;
   @property({ type: Number }) public nightPosition = 0;
   @property({ type: String }) public forcedReason = "";
+  @property({ attribute: false }) public coverOrientations: Record<string, number> = {};
 
   static styles = css`
     :host {
@@ -172,6 +173,43 @@ export class RsCoverSection extends LitElement {
     }
     .status-hint.paused {
       color: var(--warning-color, #ff9800);
+    }
+    .orientation-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 0;
+      font-size: 13px;
+    }
+    .orientation-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .orientation-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .orientation-chip {
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      background: transparent;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      color: var(--primary-text-color);
+      transition:
+        background 0.15s,
+        border-color 0.15s;
+    }
+    .orientation-chip.selected {
+      background: var(--primary-color);
+      border-color: var(--primary-color);
+      color: var(--text-primary-color);
     }
   `;
 
@@ -402,12 +440,84 @@ export class RsCoverSection extends LitElement {
                         ></rs-threshold-field>
                       </div>
                     </div>
+
+                    ${this._renderOrientationSection(l)}
                   `
                 : nothing}
             </div>
           `
         : nothing}
     `;
+  }
+
+  private static readonly _DIRECTIONS: Array<{ label: TranslationKey; key: string; deg: number }> =
+    [
+      { label: "covers.orientation_N", key: "N", deg: 0 },
+      { label: "covers.orientation_NE", key: "NE", deg: 45 },
+      { label: "covers.orientation_E", key: "E", deg: 90 },
+      { label: "covers.orientation_SE", key: "SE", deg: 135 },
+      { label: "covers.orientation_S", key: "S", deg: 180 },
+      { label: "covers.orientation_SW", key: "SW", deg: 225 },
+      { label: "covers.orientation_W", key: "W", deg: 270 },
+      { label: "covers.orientation_NW", key: "NW", deg: 315 },
+    ];
+
+  private _renderOrientationSection(l: string) {
+    const covers = [...this.selectedCovers];
+    if (covers.length === 0) return nothing;
+
+    return html`
+      <div class="sub-section">
+        <div class="sub-section-header">
+          <ha-icon icon="mdi:compass-outline"></ha-icon>
+          ${localize("covers.orientation_group_title", l)}
+        </div>
+        <p
+          class="no-items"
+          style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);"
+        >
+          ${localize("covers.orientation_hint", l)}
+        </p>
+        ${covers.map((eid) => {
+          const st = this.hass.states[eid];
+          const name = (st?.attributes?.friendly_name as string) ?? eid;
+          const current = this.coverOrientations[eid];
+          return html`
+            <div class="orientation-row">
+              <span class="orientation-label">${name}</span>
+              <div class="orientation-chips">
+                <button
+                  class="orientation-chip ${current === undefined ? "selected" : ""}"
+                  @click=${() => this._setOrientation(eid, undefined)}
+                >
+                  ${localize("covers.orientation_none", l)}
+                </button>
+                ${RsCoverSection._DIRECTIONS.map(
+                  (d) => html`
+                    <button
+                      class="orientation-chip ${current === d.deg ? "selected" : ""}"
+                      @click=${() => this._setOrientation(eid, d.deg)}
+                    >
+                      ${localize(d.label, l)}
+                    </button>
+                  `,
+                )}
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  private _setOrientation(eid: string, deg: number | undefined) {
+    const next = { ...this.coverOrientations };
+    if (deg === undefined) {
+      delete next[eid];
+    } else {
+      next[eid] = deg;
+    }
+    this._emit("cover_orientations", next);
   }
 
   private _onEntityPicked(ev: CustomEvent) {

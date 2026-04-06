@@ -116,6 +116,7 @@ export interface RoomConfig {
   covers_override_minutes?: number;
   cover_schedules?: CoverScheduleEntry[];
   cover_schedule_selector_entity?: string;
+  cover_orientations?: Record<string, number>;
   covers_night_close?: boolean;
   covers_night_position?: number;
   ignore_presence?: boolean;

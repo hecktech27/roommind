@@ -965,3 +965,125 @@ class TestScheduleGateMode:
         assert result.forced_reason == "night_close"
         call_kwargs = cm.evaluate.call_args
         assert call_kwargs[1].get("forced_position") == 0 or call_kwargs.kwargs.get("forced_position") == 0
+
+
+# ── Orientation ─────────────────────────────────────────────────────────
+
+_BUILD_ORIENTED = "custom_components.roommind.managers.cover_orchestrator.build_oriented_solar_series"
+
+
+class TestCoverOrientation:
+    """Per-cover orientation: cover_orientations dict scales solar series."""
+
+    @pytest.mark.asyncio
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.5])
+    async def test_orientation_empty_dict_no_scaling(self, mock_bss):
+        """No cover_orientations → plain build_solar_series used."""
+        hass = _make_hass()
+        cm = _make_cover_manager()
+        orch = CoverOrchestrator(hass, cm, _make_model_manager())
+
+        room = _make_room(covers=["cover.blind1"])  # no cover_orientations key
+
+        with patch(_BUILD_ORIENTED) as mock_oriented:
+            await orch.async_process(
+                area_id="living_room",
+                room=room,
+                targets=TargetTemps(heat=21.0, cool=24.0),
+                mode=MODE_HEATING,
+                current_temp=20.0,
+                outdoor_temp=None,
+                q_solar=0.5,
+                predicted_peak_temp=None,
+                has_override=False,
+            )
+
+        mock_oriented.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_orientation_with_azimuths_calls_oriented_series(self):
+        """cover_orientations → build_oriented_solar_series used in Tier 2."""
+        hass = _make_hass()
+        cm = _make_cover_manager()
+        orch = CoverOrchestrator(hass, cm, _make_model_manager())
+
+        room = _make_room(
+            covers=["cover.blind1"],
+            cover_orientations={"cover.blind1": 180},
+        )
+
+        with patch(_BUILD_ORIENTED, return_value=[0.8]) as mock_oriented:
+            await orch.async_process(
+                area_id="living_room",
+                room=room,
+                targets=TargetTemps(heat=21.0, cool=24.0),
+                mode=MODE_HEATING,
+                current_temp=20.0,
+                outdoor_temp=None,
+                q_solar=0.5,
+                predicted_peak_temp=None,
+                has_override=False,
+            )
+
+        mock_oriented.assert_called_once()
+        # build_oriented_solar_series(lat, lon, n_blocks, surface_azimuths, …)
+        # surface_azimuths is the 4th positional arg
+        positional = mock_oriented.call_args[0]
+        assert len(positional) >= 4 and positional[3] == [180.0]
+
+    @pytest.mark.asyncio
+    async def test_orientation_partial_mapping_uses_only_configured(self):
+        """Only covers with an orientation entry contribute to _surface_azimuths."""
+        hass = _make_hass()
+        cm = _make_cover_manager()
+        orch = CoverOrchestrator(hass, cm, _make_model_manager())
+
+        room = _make_room(
+            covers=["cover.blind1", "cover.blind2"],
+            # Only blind1 has an orientation; blind2 is omitted
+            cover_orientations={"cover.blind1": 90},
+        )
+
+        with patch(_BUILD_ORIENTED, return_value=[0.4]) as mock_oriented:
+            await orch.async_process(
+                area_id="living_room",
+                room=room,
+                targets=TargetTemps(heat=21.0, cool=24.0),
+                mode=MODE_HEATING,
+                current_temp=20.0,
+                outdoor_temp=None,
+                q_solar=0.5,
+                predicted_peak_temp=None,
+                has_override=False,
+            )
+
+        mock_oriented.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch(_BUILD_SOLAR_SERIES, return_value=[0.5])
+    async def test_orientation_all_covers_unmapped_no_oriented_call(self, mock_bss):
+        """cover_orientations present but no covers match → plain series used."""
+        hass = _make_hass()
+        cm = _make_cover_manager()
+        orch = CoverOrchestrator(hass, cm, _make_model_manager())
+
+        room = _make_room(
+            covers=["cover.blind1"],
+            # Orientation key doesn't match any cover entity
+            cover_orientations={"cover.other": 180},
+        )
+
+        with patch(_BUILD_ORIENTED) as mock_oriented:
+            await orch.async_process(
+                area_id="living_room",
+                room=room,
+                targets=TargetTemps(heat=21.0, cool=24.0),
+                mode=MODE_HEATING,
+                current_temp=20.0,
+                outdoor_temp=None,
+                q_solar=0.5,
+                predicted_peak_temp=None,
+                has_override=False,
+            )
+
+        mock_oriented.assert_not_called()

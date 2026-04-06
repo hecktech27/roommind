@@ -75,6 +75,7 @@ _ROOM_SAVE_FIELDS = (
     "covers_override_minutes",
     "cover_schedules",
     "cover_schedule_selector_entity",
+    "cover_orientations",
     "covers_night_close",
     "covers_night_position",
     "ignore_presence",
@@ -302,6 +303,7 @@ async def websocket_list_rooms(
             }
         ],
         vol.Optional("cover_schedule_selector_entity"): str,
+        vol.Optional("cover_orientations"): {str: vol.All(vol.Coerce(int), vol.Range(min=0, max=359))},
         vol.Optional("covers_night_close"): bool,
         vol.Optional("covers_night_position"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
         vol.Optional("ignore_presence"): bool,

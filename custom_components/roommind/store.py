@@ -221,6 +221,7 @@ class RoomMindStore:
             "covers_override_minutes": config.get("covers_override_minutes", 60),
             "cover_schedules": config.get("cover_schedules", []),
             "cover_schedule_selector_entity": config.get("cover_schedule_selector_entity", ""),
+            "cover_orientations": config.get("cover_orientations", {}),
             "covers_night_close": config.get("covers_night_close", False),
             "covers_night_position": config.get("covers_night_position", 0),
             "ignore_presence": config.get("ignore_presence", False),

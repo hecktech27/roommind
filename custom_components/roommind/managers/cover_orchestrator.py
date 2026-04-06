@@ -25,7 +25,7 @@ from ..control.mpc_controller import (
     get_can_heat_cool,
     is_mpc_active,
 )
-from ..control.solar import build_solar_series, solar_elevation
+from ..control.solar import build_oriented_solar_series, build_solar_series, solar_elevation
 from ..utils.schedule_utils import resolve_schedule_index
 from .cover_manager import CoverDecision, CoverManager, compute_shading_factor
 
@@ -206,10 +206,19 @@ class CoverOrchestrator:
                 _forced_reason = "night_close"
 
         # Block D: Tiered prediction
+        # Build per-cover orientation list for solar series scaling
+        _cover_eids: list[str] = room.get("covers", [])
+        _cover_orientations: dict[str, int] = room.get("cover_orientations", {})
+        _surface_azimuths: list[float] | None = None
+        if _cover_eids and _cover_orientations:
+            _az_list = [float(_cover_orientations[eid]) for eid in _cover_eids if eid in _cover_orientations]
+            if _az_list:
+                _surface_azimuths = _az_list
+
         _cover_predicted_peak = predicted_peak_temp
         if _cover_predicted_peak is None:
             _cover_predicted_peak = self._estimate_solar_peak_temp(
-                area_id, current_temp, cover_target, q_solar, outdoor_temp
+                area_id, current_temp, cover_target, q_solar, outdoor_temp, _surface_azimuths
             )
 
         # Block E: Evaluate + apply
@@ -253,13 +262,35 @@ class CoverOrchestrator:
         target_temp: float,
         q_solar: float,
         outdoor_temp: float | None,
+        surface_azimuths: list[float] | None = None,
     ) -> float:
         """Estimate peak temperature from solar gain.
 
         Tier 1: RC model trajectory (idle model confident, incl. heat loss physics)
         Tier 2: Conservative linear fallback with default beta_s
+
+        *surface_azimuths*: list of cover surface azimuths (degrees, 0=N).
+            When provided, solar series are scaled by the per-step averaged
+            orientation factor so that north-facing covers don't trigger
+            deployment for southern sunlight.
         """
         base_temp = current_temp if current_temp is not None else target_temp
+        lat = self.hass.config.latitude
+        lon = self.hass.config.longitude
+
+        def _solar_series(n_steps: int) -> list[float]:
+            if surface_azimuths:
+                return build_oriented_solar_series(
+                    lat,
+                    lon,
+                    n_steps,
+                    surface_azimuths,
+                    dt_minutes=COVER_PREDICTION_DT_MINUTES,
+                    cloud_series=self._cloud_series,
+                )
+            return build_solar_series(
+                lat, lon, n_steps, dt_minutes=COVER_PREDICTION_DT_MINUTES, cloud_series=self._cloud_series
+            )
 
         try:
             n_idle, _, _ = self._model_manager.get_mode_counts(area_id)
@@ -271,13 +302,7 @@ class CoverOrchestrator:
                 # Tier 1: RC model trajectory with proper physics
                 model = self._model_manager.get_model(area_id)
                 n_steps = int(COVER_RC_LOOKAHEAD_H * 60 / COVER_PREDICTION_DT_MINUTES)
-                solar_series = build_solar_series(
-                    self.hass.config.latitude,
-                    self.hass.config.longitude,
-                    n_steps,
-                    dt_minutes=COVER_PREDICTION_DT_MINUTES,
-                    cloud_series=self._cloud_series,
-                )
+                solar_series = _solar_series(n_steps)
                 trajectory = model.predict_trajectory(
                     base_temp,
                     [outdoor_temp] * n_steps,
@@ -293,13 +318,7 @@ class CoverOrchestrator:
         # Using the daily peak (instead of current q_solar) means the initial position is computed
         # from the afternoon maximum — one decisive deployment rather than incremental steps as q_solar rises.
         n_daily = int(COVER_DAILY_LOOKAHEAD_H * 60 / COVER_PREDICTION_DT_MINUTES)
-        daily_series = build_solar_series(
-            self.hass.config.latitude,
-            self.hass.config.longitude,
-            n_daily,
-            dt_minutes=COVER_PREDICTION_DT_MINUTES,
-            cloud_series=self._cloud_series,
-        )
+        daily_series = _solar_series(n_daily)
         q_solar_peak = max(daily_series) if daily_series else q_solar
         return base_temp + COVER_DEFAULT_BETA_S * q_solar_peak * COVER_LINEAR_LOOKAHEAD_H
 
