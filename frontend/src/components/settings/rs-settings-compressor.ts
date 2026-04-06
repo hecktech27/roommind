@@ -5,6 +5,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { HomeAssistant, CompressorGroup, ConflictResolution } from "../../types";
 import { localize } from "../../utils/localize";
+import { getSelectValue } from "../../utils/events";
 import "../shared/rs-confirm-button";
 
 @customElement("rs-settings-compressor")
@@ -233,7 +234,7 @@ export class RsSettingsCompressor extends LitElement {
                     },
                   ]}
                   @selected=${(e: Event) => {
-                    const v = (e.target as HTMLSelectElement).value;
+                    const v = getSelectValue(e);
                     if (v) this._updateGroup(idx, "conflict_resolution", v);
                   }}
                   @closed=${(e: Event) => e.stopPropagation()}
